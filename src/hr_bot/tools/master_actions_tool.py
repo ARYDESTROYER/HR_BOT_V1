@@ -306,7 +306,7 @@ class MasterActionsDatabase:
                 ],
                 keywords=[
                     "holiday calendar", "holidays", "public holidays", "company holidays",
-                    "view holidays", "holiday list", "calendar"
+                    "view holidays", "holiday list", "calendar", "holiday"
                 ],
                 source="Master Actions Fallback"
             ),

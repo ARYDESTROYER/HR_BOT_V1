@@ -401,11 +401,20 @@ class HrBot():
         raw_query = raw_query or query or ""
         retrieval_input = (retrieval_query or query or "").strip() or raw_query
 
-        # Check for inappropriate content FIRST (before cache/processing)
-        safety_response = self._check_content_safety(raw_query)
-        if safety_response:
-            print("🛡️ CONTENT SAFETY - Inappropriate content detected")
-            return safety_response
+        # CRITICAL FIX: Check for legitimate HR policy questions FIRST
+        # before applying content safety filters. Serious concerns (harassment,
+        # threats, blackmail, etc.) should be handled through proper HR policy
+        # channels, not blocked by content filters.
+        is_policy_question = self._is_legitimate_hr_policy_question(raw_query)
+        
+        # Only apply content safety if it's NOT a legitimate policy question
+        if not is_policy_question:
+            safety_response = self._check_content_safety(raw_query)
+            if safety_response:
+                print("🛡️ CONTENT SAFETY - Inappropriate content detected")
+                return safety_response
+        else:
+            print("📋 POLICY QUESTION DETECTED - Proceeding with HR document search for serious concern")
         
         # Check cache first
         cached_response = self.response_cache.get(raw_query, context)
@@ -626,6 +635,88 @@ class HrBot():
 
         return False
     
+    def _is_legitimate_hr_policy_question(self, query: str) -> bool:
+        """
+        Detect if a query is asking about HR policies related to sensitive topics.
+        These should be handled by retrieving actual company policies, not blocked.
+        
+        Returns True if the query is asking about policies/procedures for:
+        - Harassment (sexual, workplace, etc.)
+        - Discrimination
+        - Threats/blackmail/extortion
+        - Safety concerns
+        - Reporting mechanisms
+        - Ethical violations
+        
+        This ensures serious concerns are handled through proper policy channels
+        rather than being blocked by content filters.
+        """
+        normalized = query.lower().strip()
+        
+        # Policy-related keywords that indicate seeking official guidance
+        policy_keywords = [
+            'policy', 'policies', 'procedure', 'procedures', 'report', 'reporting',
+            'complaint', 'file complaint', 'what should i do', 'what can i do',
+            'how do i', 'help me', 'need help', 'is there a policy',
+            'company policy', 'hr policy', 'workplace policy', 'what are the steps',
+            'what is the procedure', 'how to report', 'where do i report'
+        ]
+        
+        # Serious concern keywords that should always trigger policy search
+        serious_concerns = [
+            'harassment', 'harass', 'sexual harassment', 'inappropriate behavior',
+            'discrimination', 'discriminat', 'blackmail', 'threatening', 'threat',
+            'threatened', 'compromising', 'leak', 'leaking', 'extortion', 'unsafe',
+            'safety concern', 'feel unsafe', 'retaliation', 'retaliate', 
+            'whistleblow', 'ethics violation', 'unethical', 'misconduct',
+            'abuse', 'abusive', 'hostile', 'hostile environment', 'bullying',
+            'bully', 'intimidat', 'coercion', 'coerce', 'forced to', 'forcing me'
+        ]
+        
+        # Check if query mentions serious concerns
+        has_serious_concern = any(concern in normalized for concern in serious_concerns)
+        
+        # Check if query explicitly asks about policy/procedure
+        asks_about_policy = any(keyword in normalized for keyword in policy_keywords)
+        
+        # Question patterns that indicate seeking help/guidance
+        help_patterns = [
+            r'\bwhat (should|can|do|could|would) i do\b',
+            r'\bhow (do|can|should|could) i\b',
+            r'\bhelp me\b',
+            r'\bplease help\b',
+            r'\bi (need|want|require) (help|guidance|advice|support)\b',
+            r'\bis there (a|any|an) (policy|procedure|protocol)\b',
+            r'\bwhat (is|are) the (policy|policies|procedure|procedures|steps|process)\b',
+            r'\bwhere (do|can) i (report|file|submit)\b',
+            r'\bi am (scared|afraid|worried|concerned|threatened)\b',
+            r'\bi don\'?t know what to do\b',
+            r'\bwhat happens if\b',
+            r'\bcan (i|the company|they) do\b'
+        ]
+        
+        asks_for_help = any(re.search(pattern, normalized) for pattern in help_patterns)
+        
+        # CRITICAL: If it's a serious concern AND asks for help/policy, it's legitimate
+        # These must be handled through proper HR policy channels
+        if has_serious_concern and (asks_about_policy or asks_for_help):
+            return True
+        
+        # Also allow if explicitly mentions "policy" + serious topic
+        if asks_about_policy and has_serious_concern:
+            return True
+        
+        # Edge case: User describes a threatening situation without explicitly asking for help
+        # E.g., "My boss is blackmailing me" - should still search policies
+        threatening_situations = [
+            'blackmail', 'extortion', 'threatening', 'threatened', 'compromising',
+            'leak', 'forced to', 'forcing me', 'coercion', 'retaliation'
+        ]
+        if any(situation in normalized for situation in threatening_situations):
+            return True
+        
+        return False
+    
     def _check_content_safety(self, query: str) -> Optional[str]:
         """
         Check for inappropriate, NSFW, or abusive content.
@@ -686,8 +777,8 @@ class HrBot():
         
         # NSFW terms - block unless it's a policy question
         nsfw_keywords = [
-            'nude', 'naked', 'porn', 'pornography', 'xxx', 'adult content',
-            'erotic', 'masturbat', 'sex tape', 'explicit content'
+            'pornography', 'xxx', 'adult content',
+            'erotic', 'masturbat'
         ]
         
         if not is_policy_question:
@@ -716,7 +807,7 @@ class HrBot():
         # Violent or threatening language
         violent_keywords = [
             'kill', 'murder', 'harm', 'hurt', 'attack', 'beat', 'destroy',
-            'violence', 'weapon', 'gun', 'knife', 'bomb', 'threat'
+            'violence', 'weapon', 'gun', 'knife', 'bomb'
         ]
         
         # Check for violent language
