@@ -186,83 +186,301 @@ class MasterActionsDatabase:
     def _load_fallback_actions(self):
         """Load minimal fallback actions if Master Document parsing fails"""
         self.actions = [
+            # Leave Queries
             ActionGuide(
-                action_name="Apply Leave",
-                link="https://www.darwinbox.com/demo-company/leaves",
+                action_name="Find Leave Policy Document",
+                link="https://sap.demo-company.com/home/policies",
                 steps=[
-                    "Click on the mentioned link",
-                    "Select 'Apply Leave'",
-                    "Select leave type, enter reason (if any) and duration",
-                    "Hit 'Apply' and note request ID"
+                    "Login to SAP Portal",
+                    "Go to Home Page",
+                    "Scroll to the end of the page",
+                    "Click on 'Policies' section",
+                    "Open 'Leave Policy' document"
+                ],
+                keywords=[
+                    "leave policy", "policy document", "find policy", "leave rules",
+                    "policy", "leave guidelines", "leave documentation"
+                ],
+                source="Master Actions Fallback"
+            ),
+            ActionGuide(
+                action_name="Check Remaining Leaves",
+                link="https://ascent.demo-company.com/leave-management/balance",
+                steps=[
+                    "Login to Ascent Portal",
+                    "Go to 'Leave Management' Module",
+                    "Select 'Leave Application'",
+                    "Click on 'Leave Balance'",
+                    "View Remaining Leave Details"
+                ],
+                keywords=[
+                    "check leaves", "remaining leaves", "leave balance", "leave quota",
+                    "how much leave", "available leave", "leave entitlement", "days left"
+                ],
+                source="Master Actions Fallback"
+            ),
+            ActionGuide(
+                action_name="Apply for Leave",
+                link="https://ascent.demo-company.com/leave-management/apply",
+                steps=[
+                    "Login to Ascent Portal",
+                    "Go to 'Leave Management' Module",
+                    "Select 'Leave Application'",
+                    "Click on 'New Request'"
                 ],
                 keywords=[
                     "apply leave", "request leave", "take leave", "book leave",
-                    "submit leave", "leave application", "leave request",
-                    "annual leave", "vacation", "time off", "holiday", "holidays",
-                    "need holiday", "want holiday", "take holiday"
+                    "submit leave", "leave application", "new leave", "leave request"
                 ],
                 source="Master Actions Fallback"
             ),
             ActionGuide(
-                action_name="View Leave Balance",
-                link="https://www.darwinbox.com/demo-company/leave-balance",
+                action_name="Apply for Half-Day Leave",
+                link="https://ascent.demo-company.com/leave-management/apply",
                 steps=[
-                    "Click on the mentioned link",
-                    "Sign in if prompted",
-                    "Go to 'Leave Balance' or 'My Entitlements'",
-                    "View available balances by leave type"
+                    "Login to Ascent Portal",
+                    "Go to 'Leave Management' Module",
+                    "Select 'Leave Application'",
+                    "Click on 'New Request'"
                 ],
                 keywords=[
-                    "leave balance", "remaining leave", "leave entitlement",
-                    "check leave", "how much leave", "leave quota",
-                    "days left", "available leave"
+                    "half day", "half-day", "partial leave", "half day leave",
+                    "apply half day", "request half day"
+                ],
+                source="Master Actions Fallback"
+            ),
+            # Timesheet Queries
+            ActionGuide(
+                action_name="Raise OD/Attendance Regularisation",
+                link="https://ascent.demo-company.com/attendance/od-application",
+                steps=[
+                    "Login to Ascent Portal",
+                    "Go to Attendance",
+                    "Select 'OD Application'"
+                ],
+                keywords=[
+                    "od", "attendance regularisation", "regularization", "raise od",
+                    "od application", "outdoor duty", "attendance correction"
                 ],
                 source="Master Actions Fallback"
             ),
             ActionGuide(
-                action_name="Download Payslip",
-                link="https://www.darwinbox.com/demo-company/payroll/payslips",
+                action_name="Regularise Attendance for Missing Punches",
+                link="https://ascent.demo-company.com/attendance/regularisation",
                 steps=[
-                    "Click on the mentioned link",
-                    "Navigate to 'Payslips' or 'Salary Statements'",
-                    "Select month and year required",
-                    "Click 'Download' or 'View PDF'"
+                    "Login to Ascent Portal",
+                    "Go to Attendance",
+                    "Select 'My Attendance Regularisation'"
                 ],
                 keywords=[
-                    "payslip", "salary slip", "pay statement", "download payslip",
-                    "payroll", "salary statement", "wage slip", "payment proof"
+                    "missing punch", "regularise attendance", "attendance regularisation",
+                    "forgot punch", "punch correction", "attendance correction", "regularize"
                 ],
                 source="Master Actions Fallback"
             ),
             ActionGuide(
-                action_name="Update Personal Details",
-                link="https://www.darwinbox.com/demo-company/profile/edit",
+                action_name="Update Timesheet",
+                link="https://ascent.demo-company.com/timesheet",
                 steps=[
-                    "Click on the mentioned link",
-                    "Open 'Personal Details' or 'Edit Profile'",
-                    "Update fields (address, phone, emergency contact, bank details)",
-                    "Save changes and confirm via verification prompt if any"
+                    "Login to Ascent Portal",
+                    "Go to 'Timesheet' tab",
+                    "Select 'Missing Timesheet'",
+                    "Add Task",
+                    "Submit"
                 ],
                 keywords=[
-                    "update details", "change address", "update phone", "personal information",
-                    "edit profile", "update profile", "change details", "emergency contact",
-                    "bank details", "update bank"
+                    "timesheet", "update timesheet", "fill timesheet", "submit timesheet",
+                    "missing timesheet", "add task", "timesheet entry"
+                ],
+                source="Master Actions Fallback"
+            ),
+            # Generic Queries
+            ActionGuide(
+                action_name="View Holiday Calendar",
+                link="https://sap.demo-company.com/home/holiday-calendar",
+                steps=[
+                    "Login to SAP Portal",
+                    "Go to Home Page",
+                    "Scroll to the end of the page",
+                    "Click on 'Holiday Calendar'"
+                ],
+                keywords=[
+                    "holiday calendar", "holidays", "public holidays", "company holidays",
+                    "view holidays", "holiday list", "calendar"
                 ],
                 source="Master Actions Fallback"
             ),
             ActionGuide(
-                action_name="Enroll in Mandatory Training",
-                link="https://sumtotal.demo-company.com/learning/my-learning",
+                action_name="Access HR Policies of the Organization",
+                link="https://sap.demo-company.com/home/policies",
                 steps=[
-                    "Click on the mentioned link",
-                    "Sign in if required",
-                    "Search or open the assigned course under 'Assigned' or 'Recommended'",
-                    "Click 'Enroll' or 'Start' and follow module instructions"
+                    "Login to SAP Portal",
+                    "Go to Home Page",
+                    "Scroll to the end of the page",
+                    "Click on 'Policies'"
                 ],
                 keywords=[
-                    "training", "course", "enroll training", "mandatory training",
-                    "learning", "certification", "compliance training", "elearning",
-                    "online course", "module"
+                    "hr policies", "policies", "company policies", "organization policies",
+                    "access policies", "policy documents", "hr rules"
+                ],
+                source="Master Actions Fallback"
+            ),
+            ActionGuide(
+                action_name="Find Learning Assignments",
+                link="https://sap.demo-company.com/home/learning",
+                steps=[
+                    "Login to SAP Portal",
+                    "Click on Home Dropdown",
+                    "Click on 'Learning'"
+                ],
+                keywords=[
+                    "learning", "learning assignments", "training", "courses",
+                    "find learning", "my learning", "assignments"
+                ],
+                source="Master Actions Fallback"
+            ),
+            ActionGuide(
+                action_name="Refer for Any Position",
+                link="https://sap.demo-company.com/careers/referral",
+                steps=[
+                    "Login to SAP Portal",
+                    "Click on 'Careers'",
+                    "Go to 'Referral Tracking'",
+                    "Add Referral & Submit"
+                ],
+                keywords=[
+                    "referral", "refer", "refer position", "employee referral",
+                    "referral tracking", "add referral", "job referral"
+                ],
+                source="Master Actions Fallback"
+            ),
+            ActionGuide(
+                action_name="Raise Resignation in the Tool",
+                link="https://sap.demo-company.com/profile/separation",
+                steps=[
+                    "Login to SAP Portal",
+                    "Go to 'View My Profile'",
+                    "Select 'Actions'",
+                    "Click on 'Separation'"
+                ],
+                keywords=[
+                    "resignation", "resign", "quit", "separation", "raise resignation",
+                    "submit resignation", "leave company"
+                ],
+                source="Master Actions Fallback"
+            ),
+            # Payroll Queries
+            ActionGuide(
+                action_name="Access Payslips",
+                link="https://ascent.demo-company.com/payroll/payslips",
+                steps=[
+                    "Login to Ascent Portal",
+                    "Click on Menu",
+                    "Select 'Payslips'"
+                ],
+                keywords=[
+                    "payslip", "payslips", "salary slip", "access payslip",
+                    "download payslip", "view payslip", "pay statement"
+                ],
+                source="Master Actions Fallback"
+            ),
+            ActionGuide(
+                action_name="Declare Flexi Basket Components",
+                link="https://ascent.demo-company.com/payroll/flexi-basket",
+                steps=[
+                    "Login to Ascent Portal",
+                    "Click on Menu",
+                    "Select 'Flexi Basket Declaration'"
+                ],
+                keywords=[
+                    "flexi basket", "declare flexi", "flexi components", "flexi declaration",
+                    "basket declaration", "salary components"
+                ],
+                source="Master Actions Fallback"
+            ),
+            ActionGuide(
+                action_name="Submit Flexi Basket Bills",
+                link="https://ascent.demo-company.com/payroll/manage-claims",
+                steps=[
+                    "Login to Ascent Portal",
+                    "Click on Menu",
+                    "Select 'Manage Claims'",
+                    "Click 'New Request'"
+                ],
+                keywords=[
+                    "flexi bills", "submit bills", "flexi basket bills", "claims",
+                    "manage claims", "bill submission", "reimbursement"
+                ],
+                source="Master Actions Fallback"
+            ),
+            ActionGuide(
+                action_name="Update Bank Account for Salary Credit",
+                link="https://ascent.demo-company.com/profile/personal-details",
+                steps=[
+                    "Login to Ascent Portal",
+                    "Click on Menu",
+                    "Select 'Personal Details'"
+                ],
+                keywords=[
+                    "bank account", "update bank", "salary credit", "bank details",
+                    "change bank", "account details", "salary account"
+                ],
+                source="Master Actions Fallback"
+            ),
+            ActionGuide(
+                action_name="Declare Income Tax and View Tax Calculator",
+                link="https://ascent.demo-company.com/payroll/tax-declaration",
+                steps=[
+                    "Login to Ascent Portal",
+                    "Go to Main Menu",
+                    "Select 'Investment Declaration/Income Tax Calculator'"
+                ],
+                keywords=[
+                    "income tax", "tax declaration", "tax calculator", "declare tax",
+                    "investment declaration", "tax", "it declaration"
+                ],
+                source="Master Actions Fallback"
+            ),
+            ActionGuide(
+                action_name="View or Download Form-16",
+                link="https://ascent.demo-company.com/payroll/form16",
+                steps=[
+                    "Login to Ascent Portal",
+                    "Go to Main Menu",
+                    "Click on 'Form-16'"
+                ],
+                keywords=[
+                    "form 16", "form-16", "form16", "tax form", "download form 16",
+                    "view form 16", "tax certificate"
+                ],
+                source="Master Actions Fallback"
+            ),
+            # PMS Queries
+            ActionGuide(
+                action_name="Update Goals",
+                link="https://sap.demo-company.com/performance/goals",
+                steps=[
+                    "Login to SAP Portal",
+                    "Go to Home Page",
+                    "Under 'For You Today' click on 'Goal Setting by Employee' or go to Home Dropdown → Performance Inbox"
+                ],
+                keywords=[
+                    "goals", "update goals", "goal setting", "set goals",
+                    "performance goals", "objectives", "kpi"
+                ],
+                source="Master Actions Fallback"
+            ),
+            ActionGuide(
+                action_name="Access Probation Dashboard",
+                link="https://sap.demo-company.com/performance/probation",
+                steps=[
+                    "Login to SAP Portal",
+                    "Go to Home Page",
+                    "Under 'For You Today' click on 'Probation Icon' or go to Home Dropdown → Performance → Inbox"
+                ],
+                keywords=[
+                    "probation", "probation dashboard", "probation review",
+                    "access probation", "probation status"
                 ],
                 source="Master Actions Fallback"
             )
@@ -370,8 +588,12 @@ class MasterActionsTool(BaseTool):
     name: str = "master_actions_guide"
     description: str = (
         "Provides step-by-step instructions with direct links for performing HR system actions. "
-        "Use this tool when the user asks HOW TO do something specific like: "
-        "apply leave, download payslip, update profile, enroll in training, check leave balance. "
+        "Use this tool when the user asks HOW TO do something specific OR when they request "
+        "links/access to HR portals and resources. Examples: "
+        "'how to apply leave', 'download payslip', 'update profile', 'enroll in training', "
+        "'check leave balance', 'holiday calendar', 'view policies', 'access learning portal', "
+        "'show me form-16', 'where can I find payslips'. "
+        "ALWAYS use this tool for queries about accessing/viewing/downloading HR documents or portals. "
         "Returns actionable links and clear step-by-step procedures."
     )
     args_schema: type[BaseModel] = MasterActionsToolInput
