@@ -37,7 +37,7 @@ def run():
     print("="*70 + "\n")
     
     # Default query for testing
-    default_query = "What is the maternity leave policy and how many weeks am I entitled to?"
+    default_query = "How to download my Form-16 and also tell me how to apply for leaves"
     
     # Check if query is provided as argument
     if len(sys.argv) > 1 and sys.argv[0] != 'crewai':
