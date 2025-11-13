@@ -793,9 +793,11 @@ class HrBot():
                         "or how to report inappropriate behavior, please rephrase your question professionally."
                     )
             
-            # Check NSFW keywords
+            # Check NSFW keywords using word boundaries
             for keyword in nsfw_keywords:
-                if keyword in normalized:
+                # Use word boundary regex to match whole words only
+                pattern = r'\b' + re.escape(keyword) + r'\b'
+                if re.search(pattern, normalized):
                     return (
                         "⚠️ **NSFW Content Detected**\n\n"
                         "Your message contains content that is inappropriate for workplace communication. "
@@ -810,9 +812,12 @@ class HrBot():
             'violence', 'weapon', 'gun', 'knife', 'bomb'
         ]
         
-        # Check for violent language
+        # Check for violent language using word boundaries to avoid false positives
+        # (e.g., "bomb" shouldn't match "Bombay", "bill" shouldn't match in "I have the bill")
         for keyword in violent_keywords:
-            if keyword in normalized:
+            # Use word boundary regex to match whole words only
+            pattern = r'\b' + re.escape(keyword) + r'\b'
+            if re.search(pattern, normalized):
                 # Exception: workplace safety questions
                 if any(safe in normalized for safe in ['safety', 'policy', 'procedure', 'prevent', 'report']):
                     continue
@@ -827,7 +832,9 @@ class HrBot():
         # Check for discriminatory language (if hate speech patterns exist)
         hate_speech_keywords = ['racist', 'sexist', 'homophobic', 'transphobic', 'xenophobic']
         for keyword in hate_speech_keywords:
-            if keyword in normalized:
+            # Use word boundary regex to match whole words only
+            pattern = r'\b' + re.escape(keyword) + r'\b'
+            if re.search(pattern, normalized):
                 # Exception: anti-discrimination policy questions
                 if any(policy in normalized for policy in ['policy', 'procedure', 'prevent', 'report', 'complaint']):
                     continue
