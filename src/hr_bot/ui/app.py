@@ -8,25 +8,445 @@ from __future__ import annotations
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
+import os
+import logging
 
 import streamlit as st
+from dotenv import load_dotenv, find_dotenv
 
 from hr_bot.crew import HrBot
 
+# Load .env so RBAC email lists are available
+load_dotenv(find_dotenv(), override=False)
+
+# (Using Streamlit built-in OIDC; no manual OAuth endpoints required)
+
+
+
+
+def _clear_query_params():
+    """Clear query params in a Streamlit-version-safe way."""
+    try:
+        # Newer Streamlit: stable API
+        st.set_query_params()
+    except Exception:
+        try:
+            # Older Streamlit: experimental API
+            st.experimental_set_query_params()
+        except Exception:
+            # Last resort: ignore
+            pass
+
+
+# Custom in-app PKCE OAuth removed — use Streamlit built-in `st.login()` / `st.user` only.
+
 # ============================================================================
-# AUTHENTICATION CHECK - REDIRECT TO LOGIN IF NOT AUTHENTICATED
+# AUTHENTICATION CHECK - USING STREAMLIT'S BUILT-IN OAUTH
 # ============================================================================
 
-# Check if user is authenticated
-# OAuth removed - using default employee role for now
-if 'user' not in st.session_state:
-    # Set default user for testing (no authentication)
-    st.session_state['user'] = {
-        'email': 'test@example.com',
-        'name': 'Test User',
-        'role': 'employee'  # or 'executive' for testing
-    }
+def _env_list(key: str) -> List[str]:
+    """Get list of emails from environment variable."""
+    v = os.getenv(key, '')
+    return [x.strip().lower() for x in v.split(',') if x.strip()]
+
+def _derive_role(email: str) -> str:
+    """Derive user role from email address."""
+    e = email.strip().lower()
+    if e in _env_list('EXECUTIVE_EMAILS'):
+        return 'executive'
+    if e in _env_list('EMPLOYEE_EMAILS'):
+        return 'employee'
+    return 'unauthorized'
+
+
+def _get_current_email() -> Optional[str]:
+    """Return the best-guess email for the current session.
+
+    Order of precedence:
+    - `st.session_state['logged_in_email']` (persisted from OAuth/dev-login)
+    - `st.session_state['dev_email']` (dev fallback)
+    - Attributes on `st.user`: `email`, `preferred_username`, `sub`, `name` (if contains '@')
+    - Environment `DEV_TEST_EMAIL` when `ALLOW_DEV_LOGIN` is enabled
+    Returns `None` if no email could be determined.
+    """
+    # Debug entry (print-level safe)
+    try:
+        # Avoid assuming st.session_state exists in all environments
+        sess_email = None
+        try:
+            sess_email = st.session_state.get('logged_in_email')
+        except Exception:
+            sess_email = None
+        print(f"DEBUG: _get_current_email - session logged_in_email: {sess_email}")
+    except Exception:
+        pass
+
+    # 1) persisted session value (highest precedence)
+    try:
+        email = st.session_state.get("logged_in_email")
+        if email:
+            return str(email).strip().lower()
+    except Exception:
+        pass
+
+    # 2) dev email in session (possible developer fallback)
+    try:
+        dev = st.session_state.get("dev_email")
+        if dev:
+            return str(dev).strip().lower()
+    except Exception:
+        pass
+
+    # 3) try to extract from st.user safely (handle attribute, mapping, or other shapes)
+    try:
+        user_obj = getattr(st, 'user', None)
+        if user_obj:
+            # Preferred extraction order per requirements:
+            # email -> preferred_username -> name (only if contains '@') -> sub (only if contains '@')
+            # 3.a Attributes on object
+            for attr in ("email", "preferred_username"):
+                try:
+                    if hasattr(user_obj, attr):
+                        val = getattr(user_obj, attr)
+                        if val:
+                            sval = str(val).strip()
+                            if sval:
+                                return sval.lower()
+                except Exception:
+                    continue
+
+            # 3.b name (only if contains '@')
+            try:
+                if hasattr(user_obj, 'name'):
+                    val = getattr(user_obj, 'name')
+                    if val:
+                        sval = str(val).strip()
+                        if sval and '@' in sval:
+                            return sval.lower()
+            except Exception:
+                pass
+
+            # 3.c sub (only if contains '@')
+            try:
+                if hasattr(user_obj, 'sub'):
+                    val = getattr(user_obj, 'sub')
+                    if val:
+                        sval = str(val).strip()
+                        if sval and '@' in sval:
+                            return sval.lower()
+            except Exception:
+                pass
+
+            # 3.d If user_obj is dict-like, check keys in the same order
+            try:
+                ud = None
+                try:
+                    ud = dict(user_obj)
+                except Exception:
+                    ud = None
+                if isinstance(ud, dict):
+                    for key in ("email", "preferred_username"):
+                        if key in ud and ud[key]:
+                            sval = str(ud[key]).strip()
+                            if sval:
+                                return sval.lower()
+                    if 'name' in ud and ud['name'] and '@' in str(ud['name']):
+                        return str(ud['name']).strip().lower()
+                    if 'sub' in ud and ud['sub'] and '@' in str(ud['sub']):
+                        return str(ud['sub']).strip().lower()
+            except Exception:
+                pass
+
+            # 3.e As a last resort, scan the string representation for an email-like token
+            try:
+                rep = str(user_obj)
+                import re
+                m = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", rep)
+                if m:
+                    return m.group(0).lower()
+            except Exception:
+                pass
+    except Exception:
+        # be conservative - don't crash the app if Streamlit user object is unexpected
+        pass
+
+    # 4) fallback to DEV_TEST_EMAIL if allowed (least precedence)
+    try:
+        allow_dev = os.getenv("ALLOW_DEV_LOGIN", "false").lower() in ("1", "true", "yes")
+        env_dev = os.getenv("DEV_TEST_EMAIL", "").strip().lower()
+        if allow_dev and env_dev:
+            return env_dev
+    except Exception:
+        pass
+
+    # If nothing found, return None (do not return sentinel like 'unknown')
+    return None
+
+def ensure_authenticated() -> bool:
+    """Check authentication using Streamlit's built-in OAuth."""
+    # If we already have a logged in email from an earlier OAuth flow, use it
+    if st.session_state.get("logged_in_email"):
+        # Short-circuit: derive role from persisted email
+        user_email = st.session_state.get("logged_in_email")
+        # Validate persisted email before using it
+        if not user_email or '@' not in str(user_email):
+            # Clear any invalid persisted login and prompt the user to sign in again
+            try:
+                st.session_state.pop('logged_in_email', None)
+            except Exception:
+                pass
+            st.info("We couldn't read your previous login. Please sign in with Google to continue.")
+            return False
+        # Optional debug (controlled by env flag)
+        if os.getenv("DEBUG_AUTH", "false").lower() in ("1", "true", "yes"):
+            st.sidebar.write("DEBUG st.user:", getattr(st, "user", None))
+            try:
+                if getattr(st, 'user', None):
+                    try:
+                        st.sidebar.json(dict(st.user))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        st.sidebar.markdown("### Debug: User Info")
+        st.sidebar.markdown(f"**Extracted Email:** {user_email}")
+        user_role = _derive_role(user_email)
+        if user_role == 'unauthorized':
+            st.error(f"Access denied for {user_email}. Please contact your administrator.")
+            st.sidebar.markdown(f"**Role:** {user_role}")
+            return False
+        st.sidebar.markdown(f"**Role:** {user_role}")
+        return True
+
+    # Rely on Streamlit's built-in `st.login()` / `st.user` identity cookie.
+    # The Streamlit runtime will populate `st.user` after a successful
+    # `st.login()` flow; we do not perform manual code exchanges here.
+
+    # Developer auto-login (local testing convenience)
+    allow_dev_env = os.getenv("ALLOW_DEV_LOGIN", "false").lower() in ("1", "true", "yes")
+    dev_email_env = os.getenv("DEV_TEST_EMAIL", "").strip().lower()
+    # Try to extract any email-like attribute from Streamlit's `st.user` object
+    st_user_email = None
+    try:
+        if getattr(st, 'user', None):
+            # Follow required extraction order here as a quick-guess (dropped validation will occur later)
+            try:
+                if hasattr(st.user, 'email') and st.user.email:
+                    st_user_email = str(st.user.email).strip().lower()
+                elif hasattr(st.user, 'preferred_username') and st.user.preferred_username:
+                    st_user_email = str(st.user.preferred_username).strip().lower()
+                elif hasattr(st.user, 'name') and st.user.name and '@' in str(st.user.name):
+                    st_user_email = str(st.user.name).strip().lower()
+                elif hasattr(st.user, 'sub') and st.user.sub and '@' in str(st.user.sub):
+                    st_user_email = str(st.user.sub).strip().lower()
+            except Exception:
+                st_user_email = None
+    except Exception:
+        st_user_email = None
+
+    if allow_dev_env and dev_email_env and not st.session_state.get("logged_in_email") and not st_user_email:
+        # Auto-populate the session for local developer testing to avoid 'unknown' access
+        st.session_state["dev_email"] = dev_email_env
+        st.session_state["logged_in_email"] = dev_email_env
+        st.sidebar.markdown("**Developer auto-login enabled (from DEV_TEST_EMAIL)**")
+        return True
+
+    # If user is not logged in, show login button / OAuth option
+        if not st.user:
+                # Polished login card: centered, clear title, short description, and supportive note
+                st.markdown(
+                        """
+                        <style>
+                        .login-card{display:flex;align-items:center;justify-content:center;margin-top:2.5rem;padding:0 1rem}
+                        .login-inner{background:linear-gradient(180deg,#ffffff, #fbfbff);box-shadow:0 10px 40px rgba(30,30,60,0.08);border-radius:14px;padding:40px;max-width:740px;width:100%;}
+                        .brand-row{display:flex;align-items:center;gap:16px;margin-bottom:8px}
+                        .brand-title{font-size:34px;font-weight:800;margin:0;background:linear-gradient(90deg,#2b2f7a,#6f6fe8);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+                        .brand-sub{color:#6b6b80;margin-top:6px;margin-bottom:20px}
+                        .login-actions{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:18px}
+                        .legal-note{color:#9aa0b4;font-size:12px;margin-top:12px;text-align:center}
+                        /* Google-like button styling for Streamlit buttons */
+                        .stButton>button{background:#fff;border:1px solid #dcdfe6;color:#202124;padding:10px 14px;border-radius:10px;display:inline-flex;align-items:center;gap:10px;box-shadow:none;font-weight:600}
+                        .stButton>button:hover{box-shadow:0 2px 6px rgba(60,64,67,0.08)}
+                        .stButton>button:active{transform:translateY(1px)}
+                        /* Add left padding to visually reserve space for an icon */
+                        .stButton>button{padding-left:48px}
+                        /* Decorative pseudo-icon using radial-gradient to mimic multicolor mark */
+                        .stButton>button::before{content:'';width:20px;height:20px;border-radius:4px;margin-left:-36px;margin-right:12px;display:inline-block;background-image:linear-gradient(45deg,#4285F4 0%,#34A853 50%,#FBBC05 75%,#EA4335 100%)}
+                        @media (max-width:520px){.login-inner{padding:22px}.brand-title{font-size:22px}}
+                        /* entrance animation */
+                        @keyframes liftFade {
+                            0% {opacity:0; transform: translateY(14px) scale(0.995)}
+                            100% {opacity:1; transform: translateY(0) scale(1)}
+                        }
+                        .login-inner{animation: liftFade 420ms cubic-bezier(.2,.9,.2,1) both}
+                        .privacy-link{color:#6b6b80;font-size:13px;text-decoration:none;border-bottom:1px dotted rgba(107,107,128,0.25);padding-bottom:2px}
+                        </style>
+
+                        <div class="login-card">
+                            <div class="login-inner">
+                                <div class="brand-row" style="justify-content:center;">
+                                    <div>
+                                        <div class="brand-title">Inara</div>
+                                        <div class="brand-sub">HR Assistant — Secure access to company policies and documents.</div>
+                                    </div>
+                                </div>
+                                <div style="color:#333333;font-size:15px;line-height:1.45;text-align:center">
+                                    Sign in with your company Google account to continue. Access is restricted to authorized employees only.
+                                </div>
+                                <div class="login-actions">
+                                    <!-- placeholder for Streamlit buttons; real interactive buttons render below -->
+                                </div>
+                                <div class="legal-note">By signing in you agree to your company's acceptable use policy. Your login is securely handled by Google.</div>
+                            </div>
+                        </div>
+                        <div style="text-align:center;margin-top:12px">
+                            <a class="privacy-link" href="#" target="_blank">Privacy &amp; Policies</a>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                )
+        # Prefer Streamlit's built-in OIDC when configured via .streamlit/secrets.toml
+        try:
+            auth_section = None
+            try:
+                auth_section = st.secrets.get("auth") if hasattr(st, "secrets") else None
+            except Exception:
+                auth_section = None
+
+            if auth_section:
+                # If a provider named 'google' is configured, show a dedicated button
+                providers = []
+                try:
+                    providers = list(auth_section.keys())
+                except Exception:
+                    providers = []
+
+                if "google" in providers:
+                    # Center the sign-in button under the card for a cleaner look
+                    left, mid, right = st.columns([1, 2, 1])
+                    with mid:
+                        if st.button("Sign in with Google"):
+                            try:
+                                st.login("google")
+                            except Exception:
+                                try:
+                                    st.login()
+                                except Exception:
+                                    pass
+
+                    return False
+                else:
+                    # Generic built-in login (first provider)
+                    try:
+                        st.login()
+                        return False
+                    except Exception:
+                        # fall through to developer fallback if st.login isn't available
+                        pass
+
+            # No Streamlit built-in provider configured: offer developer fallback only
+            allow_dev = os.getenv("ALLOW_DEV_LOGIN", "false").lower() in ("1", "true", "yes")
+            if allow_dev:
+                st.warning("Developer fallback enabled. Only use this locally.")
+                dev_email = st.text_input("Developer email (for local testing)", value=os.getenv("DEV_TEST_EMAIL", ""))
+                # Keep developer button centered as well
+                l, m, r = st.columns([1, 2, 1])
+                with m:
+                    if st.button("Sign in (dev)") and dev_email:
+                        st.session_state["dev_email"] = dev_email.strip().lower()
+                        st.session_state["logged_in_email"] = dev_email.strip().lower()
+                        return True
+            else:
+                st.info("Sign in is not available in this environment. Configure Streamlit OIDC via `.streamlit/secrets.toml`.")
+
+            return False
+        except Exception:
+            # Fallback: developer login
+            allow_dev = os.getenv("ALLOW_DEV_LOGIN", "false").lower() in ("1", "true", "yes")
+            if allow_dev:
+                st.warning("Developer fallback enabled. Only use this locally.")
+                dev_email = st.text_input("Developer email (for local testing)", value=os.getenv("DEV_TEST_EMAIL", ""))
+                if st.button("Sign in (dev)") and dev_email:
+                    st.session_state["dev_email"] = dev_email.strip().lower()
+                    st.session_state["logged_in_email"] = dev_email.strip().lower()
+                    return True
+            else:
+                st.info("Sign in is not available in this environment. Configure Streamlit OIDC or enable developer login.")
+
+            return False
+
+    # User is authenticated, check RBAC
+    # Optional debug sidebar controlled by env var
+    if os.getenv("DEBUG_AUTH", "false").lower() in ("1", "true", "yes"):
+        st.sidebar.write("DEBUG st.user:", getattr(st, "user", None))
+        if getattr(st, 'user', None):
+            try:
+                st.sidebar.json(dict(st.user))
+            except Exception:
+                pass
+
+    # Extract email from session / st.user / env (safe)
+    user_email = _get_current_email()
+
+    # If st.user exists but we couldn't determine a usable email, show clear message and
+    # offer a retry using Streamlit's login so the user can re-run the provider flow.
+    if getattr(st, 'user', None) and (not user_email or '@' not in user_email):
+        # Friendly non-blocking message and clear CTA to re-run the provider flow
+        try:
+            st.session_state.pop('logged_in_email', None)
+        except Exception:
+            pass
+        st.info("Please complete sign-in with Google so we can verify your company account.")
+        # Offer a retry button to trigger the provider login again (safe no-op if not configured)
+        try:
+            col_a, col_b = st.columns([1, 1])
+            with col_a:
+                if st.button("Sign in with Google"):
+                    try:
+                        st.login("google")
+                    except Exception:
+                        try:
+                            st.login()
+                        except Exception:
+                            pass
+            with col_b:
+                # Provide developer fallback option if enabled
+                if os.getenv("ALLOW_DEV_LOGIN", "false").lower() in ("1", "true", "yes"):
+                    if st.button("Use developer login"):
+                        dev_email = os.getenv("DEV_TEST_EMAIL", "")
+                        if dev_email:
+                            st.session_state['dev_email'] = dev_email.strip().lower()
+                            st.session_state['logged_in_email'] = dev_email.strip().lower()
+                            st.experimental_rerun()
+        except Exception:
+            pass
+        return False
+
+    # Persist the extracted email into session state for later short-circuiting
+    try:
+        if user_email and not st.session_state.get('logged_in_email'):
+            st.session_state['logged_in_email'] = user_email
+    except Exception:
+        pass
+
+    # Before deriving roles, validate extracted email
+    if not user_email or '@' not in user_email:
+        # If we still don't have an email, show a friendly prompt instead of a red error
+        st.info("We couldn't determine your login email. Please sign in to continue.")
+        return False
+
+    # Now derive role and enforce RBAC
+    user_role = _derive_role(user_email)
+    if user_role == 'unauthorized':
+        st.error(f"Access denied for {user_email}. Please contact your administrator.")
+        st.sidebar.markdown(f"**Role:** {user_role}")
+        return False
+
+    st.sidebar.markdown(f"**Extracted Email:** {user_email}")
+    st.sidebar.markdown(f"**Role:** {user_role}")
+    return True
 
 # ============================================================================
 # CONFIGURATION
@@ -1300,8 +1720,10 @@ def main() -> None:
         initial_sidebar_state="collapsed",
     )
 
-    # Apply professional styling
     st.markdown(MINIMAL_CSS, unsafe_allow_html=True)
+
+    if not ensure_authenticated():
+        return
 
     # Inject simple, reliable feedback interaction
     st.markdown(
@@ -1342,11 +1764,18 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    # Get user information
-    user_info = st.session_state.get('user', {})
-    user_email = user_info.get('email', 'Unknown User')
-    user_role = user_info.get('role', 'employee')
-    user_name = user_info.get('name', user_email.split('@')[0])
+    # Get user information from Streamlit's built-in auth
+    # Support developer fallback (local testing) via `st.session_state['dev_email']`
+    if st.session_state.get("dev_email"):
+        user_email = st.session_state.get("dev_email").lower()
+        user_name = user_email.split("@")[0]
+        user_role = _derive_role(user_email)
+        st.sidebar.markdown("**Note:** Running in developer fallback auth mode")
+    else:
+        user_email = getattr(st.user, 'email', getattr(st.user, 'sub', 'unknown'))
+        user_email = str(user_email).lower() if user_email else 'unknown'
+        user_role = _derive_role(user_email)
+        user_name = getattr(st.user, 'name', user_email.split('@')[0] if '@' in user_email else user_email)
     
     # Professional header with enhanced styling, user info, and logout
     st.markdown(f"""
@@ -1382,6 +1811,19 @@ def main() -> None:
     </div>
     """, unsafe_allow_html=True)
     st.caption("Your intelligent HR companion for policies, benefits, and workplace guidance — available 24/7")
+    col_logout = st.container()
+    with col_logout:
+        if st.button('Sign out', key='logout_btn'):
+            # Clear session state and use Streamlit's built-in logout when available
+            for k in ['dev_email', 'logged_in_email', '_pkce_verifier', '_oauth_state']:
+                if k in st.session_state:
+                    del st.session_state[k]
+                try:
+                    st.logout()
+                except Exception:
+                    # If st.logout is not available locally, just clear query params and rerun
+                    _clear_query_params()
+            _rerun()
     
     # Enhanced welcome message for first-time users
     if len(st.session_state.get("history", [])) == 0:
@@ -1414,8 +1856,19 @@ def main() -> None:
         st.session_state["s3_refresh_msg"] = None
 
     # Load resources with role-based access
-    user_role = st.session_state.get('user', {}).get('role', 'employee')
-    bot = load_bot(user_role=user_role)
+    current_email = _get_current_email() or 'unknown'
+    user_role = _derive_role(current_email)
+
+    # Debug: Show loading status
+    with st.spinner(f"🔐 Initializing {user_role.title()} HR Assistant..."):
+        try:
+            bot = load_bot(user_role=user_role)
+            st.success(f"✅ {user_role.title()} HR Assistant loaded successfully!")
+        except Exception as e:
+            st.error(f"❌ Failed to load HR Assistant: {e}")
+            st.error("Please try refreshing the page or contact support.")
+            st.stop()
+
     executor = get_executor()
     
     # ============================================================================

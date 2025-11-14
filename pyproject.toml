@@ -1,6 +1,6 @@
 [project]
 name = "hr_bot"
-version = "5.0"
+version = "5.5"
 description = "An HR assistant powered by AWS Bedrock Nova Lite v1 and CrewAI with ETag-based S3 smart caching and role-based document access"
 authors = [{ name = "Your Name", email = "you@example.com" }]
 requires-python = ">=3.10,<3.14"
@@ -10,6 +10,7 @@ dependencies = [
     # Langchain & AI
     "langchain>=0.3.0",
     "langchain-community>=0.3.0",
+    "langchain-core>=0.3.0",
     # AWS Bedrock support
     "boto3>=1.28.0",
     "langchain-aws>=0.1.0",
@@ -28,7 +29,7 @@ dependencies = [
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
     "python-dotenv>=1.0.0",
-    # Local Embeddings (HuggingFace) - replace remote embeddings for vectors
+    # Local Embeddings (HuggingFace)
     "langchain-huggingface>=0.3.0",
     "sentence-transformers==2.7.0",
     "torch==2.6.0",
@@ -39,6 +40,18 @@ dependencies = [
     "evaluate>=0.4.1",
     # UI
     "streamlit>=1.38.0",
+    # FastAPI & Production API
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "pyjwt[crypto]>=2.8.0",
+    "python-jose[cryptography]>=3.3.0",
+    "python-multipart>=0.0.6",
+    "jinja2>=3.1.6",
+    "authlib>=1.6.5",
+    "requests>=2.32.5",
+    "starlette>=0.49.3",
+    "itsdangerous>=2.2.0",
+    "chainlit>=2.9.0",
 ]
 
 [project.scripts]
@@ -53,6 +66,8 @@ generate_eval = "hr_bot.eval.generate_dataset:main"
 eval = "hr_bot.eval.run_eval:main"
 ragas_eval = "hr_bot.eval.ragas_eval:main"
 ragas_prod_eval = "hr_bot.eval.ragas_production_eval:main"
+api_server = "hr_bot.api.main:main"
+chainlit_app = "chainlit:cli"
 
 [build-system]
 requires = ["hatchling"]

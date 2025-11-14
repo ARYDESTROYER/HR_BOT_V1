@@ -51,11 +51,21 @@ class S3DocumentLoader:
         self.bucket_name = os.getenv("S3_BUCKET_NAME", "hr-documents-1")
         self.region = os.getenv("S3_BUCKET_REGION", "ap-south-1")
         
-        # Determine S3 prefix based on role
+        # Determine S3 prefixes based on role. We support multiple prefixes so
+        # executives can access both executive + employee + master, while
+        # employees access employee + master. Prefixes should end with '/'.
+        exec_prefix = os.getenv("S3_EXECUTIVE_PREFIX", "executive/")
+        emp_prefix = os.getenv("S3_EMPLOYEE_PREFIX", "employee/")
+        master_prefix = os.getenv("S3_MASTER_PREFIX", "master/")
+
         if self.user_role == "executive":
-            self.s3_prefix = os.getenv("S3_EXECUTIVE_PREFIX", "executive/")
+            self.s3_prefixes = [p for p in (exec_prefix, emp_prefix, master_prefix) if p]
         else:
-            self.s3_prefix = os.getenv("S3_EMPLOYEE_PREFIX", "employee/")
+            self.s3_prefixes = [p for p in (emp_prefix, master_prefix) if p]
+
+        # For backward-compatible single-prefix logging continue to expose
+        # a representative prefix (first one)
+        self.s3_prefix = self.s3_prefixes[0] if self.s3_prefixes else ""
         
         # Local cache directory
         cache_base = os.getenv("S3_CACHE_DIR", tempfile.gettempdir())
@@ -77,7 +87,7 @@ class S3DocumentLoader:
         
         print(f"🔐 S3DocumentLoader initialized:")
         print(f"   Role: {self.user_role.upper()}")
-        print(f"   S3: s3://{self.bucket_name}/{self.s3_prefix}")
+        print(f"   S3: s3://{self.bucket_name}/{' , '.join(self.s3_prefixes)}")
         print(f"   Cache: {self.cache_dir}")
         print(f"   TTL: {cache_ttl/3600:.1f}h | ETag validation: ✅")
     
@@ -91,41 +101,39 @@ class S3DocumentLoader:
             - metadata_dict: {filename: {size, last_modified, etag}}
         """
         try:
-            print(f"🔍 Listing S3 objects: s3://{self.bucket_name}/{self.s3_prefix}")
-            
-            # List all objects in S3 prefix
-            response = self.s3_client.list_objects_v2(
-                Bucket=self.bucket_name,
-                Prefix=self.s3_prefix
-            )
-            
-            if 'Contents' not in response:
-                print(f"⚠️  No objects found in S3 prefix: {self.s3_prefix}")
-                return "", {}
-            
-            # Extract ETags and metadata
+            print(f"🔍 Listing S3 objects for prefixes: {self.s3_prefixes}")
+
             etags = []
             metadata = {}
-            
-            for obj in response['Contents']:
-                key = obj['Key']
-                if key.endswith('.docx'):
-                    etag = obj['ETag'].strip('"')  # S3 returns ETags with quotes
-                    etags.append(f"{key}:{etag}")
-                    
-                    metadata[key] = {
-                        'size': obj['Size'],
-                        'last_modified': obj['LastModified'].isoformat(),
-                        'etag': etag
-                    }
-            
+
+            # Iterate across all configured prefixes and collect metadata
+            for prefix in self.s3_prefixes:
+                paginator = self.s3_client.get_paginator('list_objects_v2')
+                for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix):
+                    if 'Contents' not in page:
+                        continue
+                    for obj in page['Contents']:
+                        key = obj['Key']
+                        if key.endswith('.docx'):
+                            etag = obj.get('ETag', '').strip('"')
+                            etags.append(f"{key}:{etag}")
+                            metadata[key] = {
+                                'size': obj.get('Size'),
+                                'last_modified': getattr(obj.get('LastModified'), 'isoformat', lambda: None)(),
+                                'etag': etag
+                            }
+
+            if not etags:
+                print(f"⚠️  No objects found in S3 prefixes: {self.s3_prefixes}")
+                return "", {}
+
             # Sort for deterministic hash
             etags.sort()
-            
+
             # Compute combined hash
             combined = '|'.join(etags)
             version_hash = hashlib.sha256(combined.encode()).hexdigest()
-            
+
             print(f"📊 S3 Version: {version_hash[:16]}... ({len(metadata)} docs)")
             return version_hash, metadata
             
@@ -258,19 +266,55 @@ class S3DocumentLoader:
         """
         try:
             documents = []
-            paginator = self.s3_client.get_paginator('list_objects_v2')
-            
-            for page in paginator.paginate(Bucket=self.bucket_name, Prefix=self.s3_prefix):
-                if 'Contents' in page:
-                    for obj in page['Contents']:
-                        key = obj['Key']
-                        # Only include .docx files, skip folders
-                        if key.endswith('.docx') and not key.endswith('/'):
+
+            # Track canonical document identity to avoid duplicates when the
+            # same logical document exists under multiple prefixes. For
+            # example:
+            # - employee/Policies/Leave.docx
+            # - executive/employee/Policies/Leave.docx
+            # We want the first-seen (by prefix order) to win and the duplicate
+            # to be skipped. Canonicalization removes the leading role-specific
+            # segments for employee-scope docs so they compare equal.
+            seen_canonical = set()
+
+            for prefix in self.s3_prefixes:
+                paginator = self.s3_client.get_paginator('list_objects_v2')
+                for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix):
+                    if 'Contents' in page:
+                        for obj in page['Contents']:
+                            key = obj['Key']
+                            # Only include .docx files, skip folders
+                            if not (key.endswith('.docx') and not key.endswith('/')):
+                                continue
+
+                            # Compute a canonical path to identify duplicates.
+                            # If the key contains '/employee/' (e.g. 'executive/employee/...')
+                            # use the tail after that marker. If it starts with
+                            # top-level 'employee/' use the remainder. Otherwise,
+                            # fall back to the key relative to the current prefix.
+                            canonical = None
+                            if '/employee/' in key:
+                                canonical = key.split('/employee/', 1)[1]
+                            elif key.startswith('employee/'):
+                                canonical = key[len('employee/'):]
+                            elif key.startswith(prefix):
+                                canonical = key[len(prefix):]
+                            else:
+                                canonical = key
+
+                            # Normalize leading slashes
+                            canonical = canonical.lstrip('/')
+
+                            if canonical in seen_canonical:
+                                # Skip duplicates; earlier prefix wins
+                                continue
+
+                            seen_canonical.add(canonical)
                             documents.append(key)
-            
+
             print(f"📋 Found {len(documents)} documents in S3 for {self.user_role} role")
             return documents
-            
+
         except Exception as e:
             print(f"❌ Error listing S3 documents: {e}")
             return []
@@ -286,10 +330,21 @@ class S3DocumentLoader:
             Local file path if successful, None if failed
         """
         try:
-            # Extract filename from S3 key
-            filename = Path(s3_key).name
-            local_path = self.cache_dir / filename
-            
+            # Preserve S3 directory structure under the local cache directory.
+            # Find which configured prefix matches this key and compute relative path.
+            rel_path = None
+            for prefix in self.s3_prefixes:
+                if s3_key.startswith(prefix):
+                    rel_path = s3_key[len(prefix):]
+                    break
+
+            # If no prefix matched, fall back to using the full key as relative path
+            if rel_path is None:
+                rel_path = s3_key
+
+            local_path = self.cache_dir / Path(rel_path)
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+
             # Download file from S3
             self.s3_client.download_file(self.bucket_name, s3_key, str(local_path))
             return str(local_path)
