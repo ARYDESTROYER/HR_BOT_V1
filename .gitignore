@@ -48,3 +48,11 @@ test_output/
 
 # UV lock (optional - some teams commit this)
 # uv.lock
+.aider*
+
+# Frontend artifacts
+frontend/node_modules/
+frontend/package-lock.json
+frontend/dist/
+frontend/.cache/
+node_modules/
