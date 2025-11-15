@@ -31,9 +31,14 @@ class Settings(BaseSettings):
     # RAG Configuration
     chunk_size: int = Field(default=800, env="CHUNK_SIZE")
     chunk_overlap: int = Field(default=200, env="CHUNK_OVERLAP")
-    top_k_results: int = Field(default=5, env="TOP_K_RESULTS")
+    top_k_results: int = Field(default=12, env="TOP_K_RESULTS")  # Increased for larger document sets
     bm25_weight: float = Field(default=0.5, env="BM25_WEIGHT")
     vector_weight: float = Field(default=0.5, env="VECTOR_WEIGHT")
+    
+    # RRF Configuration for larger document sets
+    rrf_multiplier: int = Field(default=12, env="RRF_CANDIDATE_MULTIPLIER")  # Increased from 8 to 12
+    rrf_bm25_weight: float = Field(default=1.5, env="RRF_BM25_WEIGHT")
+    rrf_vector_weight: float = Field(default=1.0, env="RRF_VECTOR_WEIGHT")
     
     # Embedding Configuration
     embedding_model: str = Field(default="sentence-transformers/all-MiniLM-L6-v2", env="EMBEDDING_MODEL")  # Fast and efficient

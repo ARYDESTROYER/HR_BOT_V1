@@ -557,10 +557,10 @@ class MasterActionsDatabase:
         # Apply intelligent filtering: remove low-confidence matches
         if matches:
             best_score = matches[0][0]
-            # Only return matches within 40% of best score to avoid weak matches
+            # Only return matches within 40% of best score AND with at least 50% keyword relevance
             filtered_matches = [
                 action for score, action, keywords in matches 
-                if score >= best_score * 0.4
+                if score >= best_score * 0.4 and score >= 2  # Require minimum score of 2 for relevance
             ]
             return filtered_matches
         

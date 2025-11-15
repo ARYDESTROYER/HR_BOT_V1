@@ -24,6 +24,9 @@ from crewai.tools import BaseTool  # Correct import from crewai, not crewai_tool
 from pydantic import BaseModel, Field
 import re
 
+# Import document classifier for enhanced metadata
+from hr_bot.utils.document_classifier import DocumentClassifier, DocumentCategory
+
 # Optional reranker (lightweight, CPU-friendly)
 try:
     from sentence_transformers import CrossEncoder
@@ -114,7 +117,7 @@ class HybridRAGRetriever:
         self._last_sources: List[str] = []
 
         # Configuration
-        # Tuned defaults for sharper matches
+        # Tuned defaults for larger document sets (120+ documents)
         self.chunk_size = _get_env_int("CHUNK_SIZE", 700)
         self.chunk_overlap = _get_env_int("CHUNK_OVERLAP", 200)
         self.top_k_results = _get_env_int("TOP_K", 12, aliases=["TOP_K_RESULTS"])
@@ -122,8 +125,8 @@ class HybridRAGRetriever:
         self.vector_weight = _get_env_float("VECTOR_WEIGHT", 0.5)
         self.enable_cache = os.getenv("ENABLE_CACHE", "true").lower() == "true"
         self.cache_ttl = _get_env_int("CACHE_TTL", 3600)
-        # Larger candidate pool by default improves recall
-        self.rrf_multiplier = _get_env_int("RRF_CANDIDATE_MULTIPLIER", 8)
+        # Larger candidate pool for better recall with 120+ documents
+        self.rrf_multiplier = _get_env_int("RRF_CANDIDATE_MULTIPLIER", 12)  # Increased from 8 to 12
         # Weighting for RRF contributions
         self.rrf_bm25_weight = _get_env_float("RRF_BM25_WEIGHT", 1.5)
         self.rrf_vector_weight = _get_env_float("RRF_VECTOR_WEIGHT", 1.0)
@@ -138,6 +141,12 @@ class HybridRAGRetriever:
         # Paths
         self.vector_store_dir = Path(".rag_index")
         self.vector_store_dir.mkdir(exist_ok=True)
+        
+        # Document classifier for enhanced metadata
+        self.classifier = DocumentClassifier()
+        
+        # Category-based filtering for improved retrieval
+        self.enable_category_filtering = os.getenv("ENABLE_CATEGORY_FILTERING", "true").lower() == "true"
         
     def _compute_data_hash(self, data_dir: Path) -> str:
         """Compute hash of all documents for cache invalidation"""
@@ -161,10 +170,24 @@ class HybridRAGRetriever:
                 loader = Docx2txtLoader(str(file_path))
                 docs = loader.load()
                 
-                # Add metadata
+                # Add metadata with classification
                 for doc in docs:
                     doc.metadata['source'] = file_path.name
                     doc.metadata['file_path'] = str(file_path)
+                    
+                    # Classify document and add enhanced metadata
+                    doc_metadata = self.classifier.classify_document(
+                        str(file_path), 
+                        doc.page_content
+                    )
+                    doc.metadata.update({
+                        'category': doc_metadata.category.value,
+                        'tags': list(doc_metadata.tags),
+                        'priority': doc_metadata.priority,
+                        'access_level': doc_metadata.access_level,
+                        'keywords': list(doc_metadata.keywords)
+                    })
+                    
                     # Sanitize common template placeholders to avoid leaking into answers
                     doc.page_content = self._sanitize(doc.page_content)
                     documents.append(doc)
@@ -199,10 +222,24 @@ class HybridRAGRetriever:
                 loader = Docx2txtLoader(str(file_path))
                 docs = loader.load()
                 
-                # Add metadata
+                # Add metadata with classification
                 for doc in docs:
                     doc.metadata['source'] = file_path.name
                     doc.metadata['file_path'] = str(file_path)
+                    
+                    # Classify document and add enhanced metadata
+                    doc_metadata = self.classifier.classify_document(
+                        str(file_path), 
+                        doc.page_content
+                    )
+                    doc.metadata.update({
+                        'category': doc_metadata.category.value,
+                        'tags': list(doc_metadata.tags),
+                        'priority': doc_metadata.priority,
+                        'access_level': doc_metadata.access_level,
+                        'keywords': list(doc_metadata.keywords)
+                    })
+                    
                     # Sanitize common template placeholders to avoid leaking into answers
                     doc.page_content = self._sanitize(doc.page_content)
                     documents.append(doc)
@@ -518,13 +555,14 @@ class HybridRAGRetriever:
         # Save indexes
         self._save_index(vector_store_path, bm25_path)
     
-    def hybrid_search(self, query: str, top_k: int = None) -> List[SearchResult]:
+    def hybrid_search(self, query: str, top_k: int = None, category_filter: Optional[DocumentCategory] = None) -> List[SearchResult]:
         """
-        Perform hybrid search combining BM25 and vector search
+        Perform hybrid search combining BM25 and vector search with optional category filtering
         
         Args:
             query: Search query
             top_k: Number of results to return
+            category_filter: Optional category to filter results
             
         Returns:
             List of SearchResult objects
@@ -535,6 +573,40 @@ class HybridRAGRetriever:
             return []
         
         top_k = top_k or self.top_k_results
+        
+        # Apply category filtering if enabled and specified
+        if self.enable_category_filtering and category_filter:
+            # Filter documents by category before search
+            filtered_docs = [
+                doc for doc in self.documents 
+                if doc.metadata.get('category') == category_filter.value
+            ]
+            
+            if not filtered_docs:
+                print(f"⚠️  No documents found in category: {category_filter.value}")
+                return []
+            
+            # Create temporary retrievers with filtered documents
+            temp_vector_store = FAISS.from_texts(
+                texts=[doc.page_content for doc in filtered_docs],
+                embedding=self.embeddings,
+                metadatas=[doc.metadata for doc in filtered_docs]
+            )
+            
+            temp_faiss_retriever = temp_vector_store.as_retriever(search_kwargs={"k": top_k * self.rrf_multiplier})
+            temp_bm25_retriever = BM25Retriever.from_documents(filtered_docs)
+            temp_bm25_retriever.k = top_k * self.rrf_multiplier
+            temp_ensemble_retriever = EnsembleRetriever(
+                retrievers=[temp_bm25_retriever, temp_faiss_retriever],
+                weights=[self.rrf_bm25_weight, self.rrf_vector_weight],
+            )
+            
+            # Use filtered retrievers for this search
+            ensemble_retriever = temp_ensemble_retriever
+            print(f"🔍 Searching in category: {category_filter.value} ({len(filtered_docs)} docs)")
+        else:
+            # Use all documents
+            ensemble_retriever = self.ensemble_retriever
         
         # Query reformulation to expand synonyms/aliases for better recall
         reformulated_query = self._reformulate_query(query)
@@ -548,11 +620,14 @@ class HybridRAGRetriever:
                 return cached_result
         # Expand candidate pool for better recall
         candidate_k = max(top_k * self.rrf_multiplier, top_k)
-        self.faiss_retriever.search_kwargs["k"] = candidate_k
-        self.bm25_retriever.k = candidate_k
+        
+        # Update retriever k values (only if not using filtered retrievers)
+        if not (self.enable_category_filtering and category_filter):
+            self.faiss_retriever.search_kwargs["k"] = candidate_k
+            self.bm25_retriever.k = candidate_k
 
         # 1) Hybrid retrieval via EnsembleRetriever (invoke avoids deprecated API)
-        raw_docs = self.ensemble_retriever.invoke(reformulated_query)
+        raw_docs = ensemble_retriever.invoke(reformulated_query)
         if isinstance(raw_docs, Document):
             docs = [raw_docs]
         else:
@@ -668,6 +743,31 @@ class HybridRAGRetriever:
             self.cache.set(cache_key, results, expire=self.cache_ttl)
         
         return results
+    
+    def _detect_query_category(self, query: str) -> Optional[DocumentCategory]:
+        """
+        Automatically detect document category from query
+        
+        Args:
+            query: Search query
+            
+        Returns:
+            Detected DocumentCategory or None if unclear
+        """
+        query_lower = query.lower()
+        category_scores = {}
+        
+        # Score each category based on keyword matches in query
+        for category, keywords in self.classifier.category_keywords.items():
+            score = sum(1 for keyword in keywords if keyword in query_lower)
+            if score > 0:
+                category_scores[category] = score
+        
+        # Return category with highest score if significant
+        if category_scores and max(category_scores.values()) >= 2:
+            return max(category_scores, key=category_scores.get)
+        
+        return None
 
     def _get_reranker(self):
         if not self.rerank_enabled:
@@ -727,17 +827,36 @@ class HybridRAGRetriever:
             q = f"{q} " + " ".join(set(expansions))
         return q
 
-    def hybrid_search_with_metadata(self, query: str, top_k: int = None) -> Dict[str, Any]:
+    def hybrid_search_with_metadata(self, query: str, top_k: int = None, category_filter: Optional[DocumentCategory] = None) -> Dict[str, Any]:
         """Extended hybrid search returning raw scores and ranking metadata."""
-        results = self.hybrid_search(query, top_k)
+        # Auto-detect category if not provided
+        if category_filter is None:
+            category_filter = self._detect_query_category(query)
+        
+        results = self.hybrid_search(query, top_k, category_filter)
+        
+        # Calculate search space metrics
+        total_docs = len(self.documents)
+        if category_filter:
+            filtered_docs = len([
+                doc for doc in self.documents 
+                if doc.metadata.get('category') == category_filter.value
+            ])
+        else:
+            filtered_docs = total_docs
+        
         payload = {
             "query": query,
+            "category_filter": category_filter.value if category_filter else None,
+            "total_docs": total_docs,
+            "filtered_docs": filtered_docs,
             "results": [
                 {
                     "chunk_id": r.chunk_id,
                     "source": r.source,
                     "score": r.score,
-                    "preview": r.content[:200]
+                    "preview": r.content[:200],
+                    "category": self.documents[r.chunk_id].metadata.get('category') if r.chunk_id < len(self.documents) else None
                 } for r in results
             ]
         }
@@ -830,8 +949,12 @@ class HybridRAGTool(BaseTool):
             # Resolve top_k from env/retriever default if not provided
             if top_k is None:
                 top_k = self.retriever.top_k_results
-            # Perform hybrid search using instance variable
-            meta = self.retriever.hybrid_search_with_metadata(query, top_k)
+            
+            # Auto-detect category for improved search precision
+            detected_category = self.retriever._detect_query_category(query)
+            
+            # Perform hybrid search with optional category filtering
+            meta = self.retriever.hybrid_search_with_metadata(query, top_k, detected_category)
             # Re-fetch full SearchResult objects using chunk ids to ensure full context
             chunk_ids = [r["chunk_id"] for r in meta["results"]]
             full_map = {d.metadata['chunk_id']: d for d in self.retriever.documents if d.metadata.get('chunk_id') in chunk_ids}

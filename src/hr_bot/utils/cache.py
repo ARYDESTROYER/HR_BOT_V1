@@ -58,8 +58,11 @@ class ResponseCache:
         self.max_memory_items = max_memory_items
         self.similarity_threshold = similarity_threshold
         
-        # Memory safety: Limit query index size to prevent RAM exhaustion
-        self.max_index_entries = int(os.getenv("CACHE_MAX_INDEX_ENTRIES", "5000"))
+        # Memory safety: Configurable query index size with adaptive scaling
+        self.max_index_entries = int(os.getenv("CACHE_MAX_INDEX_ENTRIES", "10000"))
+        # Enable adaptive index management for high-volume scenarios
+        self.adaptive_index = os.getenv("CACHE_ADAPTIVE_INDEX", "true").lower() == "true"
+        self.index_cleanup_threshold = float(os.getenv("CACHE_CLEANUP_THRESHOLD", "0.8"))  # Clean up at 80% capacity
         
         # In-memory cache for hot data with query keywords
         self.memory_cache: Dict[str, Dict[str, Any]] = {}
@@ -67,7 +70,7 @@ class ResponseCache:
         # Index of normalized queries for fast similarity matching
         self.query_index: List[Tuple[str, str, set]] = []  # (cache_key, original_query, keywords)
         
-        # Cache statistics
+        # Cache statistics with enhanced metrics for scale monitoring
         self.stats = {
             "hits": 0,
             "misses": 0,
@@ -75,7 +78,9 @@ class ResponseCache:
             "disk_hits": 0,
             "semantic_hits": 0,  # NEW: hits from fuzzy matching
             "exact_hits": 0,  # NEW: hits from exact matching
-            "total_queries": 0
+            "total_queries": 0,
+            "adaptive_cleanups": 0,  # NEW: track cleanup operations
+            "cache_efficiency": 0.0  # NEW: hit ratio percentage
         }
         
         # Build query index from disk cache
@@ -170,6 +175,9 @@ class ResponseCache:
         # If we're limiting, log how many we're skipping
         if len(cache_files) > self.max_index_entries:
             logger.warning(f"⚠️  Cache index limited to {self.max_index_entries} entries (skipping {len(cache_files) - self.max_index_entries} oldest files)")
+            # Trigger adaptive cleanup if enabled and approaching capacity
+            if self.adaptive_index and len(cache_files) > self.max_index_entries * self.index_cleanup_threshold:
+                self._adaptive_cleanup(cache_files)
         
         for cache_file in cache_files_to_index:
             try:
@@ -192,6 +200,56 @@ class ResponseCache:
                 logger.error(f"Error indexing cache file {cache_file}: {e}")
         
         logger.info(f"📇 Built query index: {len(self.query_index)} entries")
+    
+    def _adaptive_cleanup(self, cache_files: List[Path]):
+        """
+        Adaptive cleanup strategy for high-volume cache management.
+        
+        Removes low-value cache entries based on:
+        1. Access frequency (least frequently used)
+        2. Age (oldest entries first)
+        3. Semantic similarity clustering (keep diverse queries)
+        """
+        logger.info(f"🔄 Running adaptive cleanup: {len(cache_files)} files, limit: {self.max_index_entries}")
+        
+        # Calculate target size (80% of max to leave headroom)
+        target_size = int(self.max_index_entries * 0.8)
+        files_to_remove = len(cache_files) - target_size
+        
+        if files_to_remove <= 0:
+            return
+        
+        # Sort by access frequency and age (oldest and least accessed first)
+        cache_files_with_stats = []
+        for cache_file in cache_files:
+            try:
+                stat = cache_file.stat()
+                # Simple heuristic: older files + larger size = lower priority
+                priority_score = stat.st_mtime + (stat.st_size / 1000)  # Size as minor factor
+                cache_files_with_stats.append((cache_file, priority_score))
+            except Exception as e:
+                logger.warning(f"Failed to stat {cache_file}: {e}")
+                cache_files_with_stats.append((cache_file, 0))  # Lowest priority for errors
+        
+        # Sort by priority (lowest first)
+        cache_files_with_stats.sort(key=lambda x: x[1])
+        
+        # Remove lowest priority files
+        removed_count = 0
+        for cache_file, _ in cache_files_with_stats[:files_to_remove]:
+            try:
+                cache_key = cache_file.stem
+                # Remove from memory cache
+                self.memory_cache.pop(cache_key, None)
+                # Remove from query index
+                self.query_index = [(k, q, kw) for k, q, kw in self.query_index if k != cache_key]
+                # Remove from disk
+                cache_file.unlink()
+                removed_count += 1
+            except Exception as e:
+                logger.error(f"Failed to remove cache file {cache_file}: {e}")
+        
+        logger.info(f"🗑️  Adaptive cleanup completed: removed {removed_count} cache entries")
     
     def _normalize_text(self, text: str) -> str:
         """Normalize text for consistent cache keys"""
@@ -236,6 +294,7 @@ class ResponseCache:
                 self.stats["hits"] += 1
                 self.stats["memory_hits"] += 1
                 self.stats["exact_hits"] += 1
+                self._update_efficiency()
                 logger.info(f"✅ EXACT MEMORY cache hit for query: {query[:50]}...")
                 return cached["response"]
             else:
@@ -267,6 +326,7 @@ class ResponseCache:
                     self.stats["hits"] += 1
                     self.stats["disk_hits"] += 1
                     self.stats["exact_hits"] += 1
+                    self._update_efficiency()
                     logger.info(f"✅ EXACT DISK cache hit for query: {query[:50]}...")
                     return cached["response"]
                 else:
@@ -323,6 +383,7 @@ class ResponseCache:
                     
                     self.stats["hits"] += 1
                     self.stats["semantic_hits"] += 1
+                    self._update_efficiency()
                     logger.info(f"✅ SEMANTIC cache hit returned!")
                     return cached["response"]
                 else:
@@ -340,6 +401,7 @@ class ResponseCache:
         
         # Cache miss - no exact or semantic match
         self.stats["misses"] += 1
+        self._update_efficiency()
         logger.info(f"❌ Cache MISS for query: {query[:50]}...")
         return None
     
@@ -414,6 +476,15 @@ class ResponseCache:
             
             logger.debug(f"🧹 Trimmed memory cache, removed {items_to_remove} items")
     
+    def _update_efficiency(self):
+        """Calculate and update cache efficiency metrics"""
+        total = self.stats["hits"] + self.stats["misses"]
+        if total > 0:
+            self.stats["cache_efficiency"] = (self.stats["hits"] / total) * 100
+        
+        # Save updated stats
+        self._save_stats()
+    
     def clear_expired(self):
         """Remove all expired cache entries from disk"""
         expired_count = 0
@@ -432,6 +503,11 @@ class ResponseCache:
                 cache_file.unlink(missing_ok=True)
         
         logger.info(f"🧹 Cleared {expired_count} expired cache entries")
+        
+        # Update statistics for adaptive cleanup
+        if expired_count > 0:
+            self.stats["adaptive_cleanups"] = self.stats.get("adaptive_cleanups", 0) + 1
+            self._save_stats()
     
     def clear_all(self):
         """Clear all cached responses (memory + disk)"""

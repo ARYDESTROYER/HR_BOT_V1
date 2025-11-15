@@ -1,5 +1,5 @@
-# 🤖 HR Bot v6.0 - Enterprise-Grade AI HR Assistant with S3 Intelligence
-## 🏆 **Production-Ready | Role-Based Access | Smart S3 Caching**
+# 🤖 HR Bot v6.5 - Enterprise-Grade AI HR Assistant with S3 Intelligence
+## 🏆 **Production-Ready | Role-Based Access | Smart S3 Caching | Enhanced RAG Filtering**
 
 A next-generation HR assistant powered by **CrewAI** and **Amazon Bedrock Nova Lite**, featuring **Role-Based Document Access**, **ETag-Based S3 Smart Caching**, and **Hybrid RAG** with a Chainlit production UI.
 
@@ -151,6 +151,28 @@ Notes:
 > **LEGACY - Streamlit (rollback only):** The Streamlit UI is preserved for emergency rollback scenarios and is intentionally not required by the default installation. Prefer Chainlit for active development and production deployments.
 
 ---
+
+## 🚀 **What's New in v6.5?**
+
+### 🔒 **Enhanced Role-Based RAG Filtering** (NEW!)
+Stricter document access control at the RAG level:
+- **Role-Aware Retrieval**: HybridRAGTool now filters results based on user role
+- **Access Level Enforcement**: Documents are filtered by `access_level` metadata (all, executive, employee)
+- **Hierarchical Access**: Executives see all documents, employees see only employee-accessible content
+- **Zero Leakage**: Prevents accidental exposure of restricted documents in search results
+
+### 🛠️ **S3 Canonical Path Fix** (NEW!)
+Fixed document deduplication logic for role-based access:
+- **Role-Specific Paths**: Executive and employee documents use separate canonical path logic
+- **Secure Deduplication**: Prevents executive documents from being treated as employee documents
+- **Path Normalization**: Correctly handles S3 prefixes for different user roles
+- **Maintained Performance**: Fix doesn't impact caching or retrieval performance
+
+### 🎯 **Improved Document Classification** (ENHANCED!)
+Better metadata assignment for accurate filtering:
+- **Enhanced Access Level Detection**: More accurate classification of document access requirements
+- **Category Tagging**: Improved categorization for better search relevance
+- **Metadata Enrichment**: Comprehensive metadata for precise role-based filtering
 
 ## 🚀 **What's New in v6.0?**
 
@@ -512,8 +534,9 @@ AWS_SECRET_ACCESS_KEY=your_aws_secret_key_here
 AWS_REGION=us-east-1  # or your preferred region
 
 # Model Configuration (Nova Lite - Ultra Low Cost)
-LLM_MODEL=bedrock/us.amazon.nova-lite-v1:0
-EMBEDDING_MODEL=local  # Uses HuggingFace all-MiniLM-L6-v2 (FREE)
+BEDROCK_MODEL=us.amazon.nova-lite-v1:0
+BEDROCK_EMBED_MODEL=amazon.titan-embed-text-v2:0
+BEDROCK_EMBED_REGION=us-east-1
 
 # S3 Configuration
 S3_BUCKET_NAME=hr-documents-1
@@ -525,6 +548,18 @@ S3_CACHE_DIR=/tmp  # Optional, defaults to system temp
 # Cache Configuration
 CACHE_TTL_HOURS=72  # Response cache TTL
 S3_CACHE_TTL=86400  # S3 document cache TTL (24 hours)
+
+# Role-Based Access Control
+EXECUTIVE_EMAILS=exec1@company.com,exec2@company.com
+EMPLOYEE_EMAILS=emp1@company.com,emp2@company.com
+
+# Chainlit Authentication (Optional)
+ALLOW_DEV_LOGIN=true
+DEV_TEST_EMAIL=dev@company.com
+OAUTH_GOOGLE_CLIENT_ID=your_google_client_id
+OAUTH_GOOGLE_CLIENT_SECRET=your_google_client_secret
+CHAINLIT_AUTH_SECRET=your_chainlit_secret
+CHAINLIT_BASE_URL=http://localhost:8501
 ```
 
 **Optional (for HR system integration):**
@@ -769,8 +804,8 @@ CACHE_TTL_HOURS=72  # Default: 72 hours (3 days)
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                     HR Bot v6.0 Architecture                              │
-│                  Role-Based S3 + ETag Smart Caching                       │
+│                     HR Bot v6.5 Architecture                              │
+│          Role-Based S3 + ETag Smart Caching + Enhanced RAG Filtering       │
 └──────────────────────────────────────────────────────────────────────────┘
 
                           User Query
@@ -792,6 +827,7 @@ CACHE_TTL_HOURS=72  # Default: 72 hours (3 days)
                     ┌──────────────────────┐
                     │  Hybrid RAG Tool     │
                     │  Role-Based Access   │
+                    │  Enhanced Filtering  │
                     └──────────┬───────────┘
                                │
         ┌──────────────────────┼──────────────────────┐

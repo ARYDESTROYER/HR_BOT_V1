@@ -36,6 +36,13 @@ class ExampleResult:
     support_ratio: float
     avg_ctx_similarity: float
     latency_s: float
+    # Additional metrics for larger document sets
+    category_filter_used: bool
+    category_name: str
+    total_docs_searched: int
+    filtered_docs_searched: int
+    retrieval_precision: float
+    retrieval_recall: float
 
 
 def sentence_split(text: str) -> List[str]:
@@ -98,12 +105,16 @@ def compute_retrieval_metrics(dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
       - doc_recall@k: fraction where gold `source` appears in results
       - avg_best_snippet_sim: average best Jaccard similarity between any retrieved context and gold_snippet
       - avg_best_snippet_cosine: same but using embedding cosine similarity
+      - category_filtering_effectiveness: improvement in precision when category filtering is used
+      - avg_search_space_reduction: percentage reduction in search space with category filtering
     """
     if not dataset:
         return {
             'doc_recall_at_k': 0.0,
             'avg_best_snippet_sim': 0.0,
             'avg_best_snippet_cosine': 0.0,
+            'category_filtering_effectiveness': 0.0,
+            'avg_search_space_reduction': 0.0,
         }
 
     has_gold = all(('source' in r and 'gold_snippet' in r) for r in dataset)
@@ -112,19 +123,27 @@ def compute_retrieval_metrics(dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
             'doc_recall_at_k': 0.0,
             'avg_best_snippet_sim': 0.0,
             'avg_best_snippet_cosine': 0.0,
+            'category_filtering_effectiveness': 0.0,
+            'avg_search_space_reduction': 0.0,
         }
 
     # Build per-row stats
     recalls = 0
     best_jaccards: List[float] = []
     best_cosines: List[float] = []
+    category_filtered_precision: List[float] = []
+    search_space_reductions: List[float] = []
+    
     for row in dataset:
         gold_src = row['source']
         gold_snip = row['gold_snippet']
         raw = row.get('raw', {})
         results = raw.get('results', [])
+        
+        # Standard recall metrics
         if any(r.get('source') == gold_src for r in results):
             recalls += 1
+            
         contexts = [r.get('preview', '') for r in results]
         if contexts:
             # Jaccard
@@ -138,12 +157,84 @@ def compute_retrieval_metrics(dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
         else:
             best_jaccards.append(0.0)
             best_cosines.append(0.0)
+        
+        # Category filtering metrics
+        if 'category_filter' in raw and raw['category_filter']:
+            # Calculate precision improvement when category filtering is used
+            category_results = [r for r in results if r.get('category') == raw['category_filter']]
+            if category_results:
+                precision = len([r for r in category_results if r.get('source') == gold_src]) / len(category_results)
+                category_filtered_precision.append(precision)
+            
+            # Calculate search space reduction
+            total_docs = raw.get('total_docs', 0)
+            filtered_docs = raw.get('filtered_docs', total_docs)
+            if total_docs > 0:
+                reduction = (total_docs - filtered_docs) / total_docs
+                search_space_reductions.append(reduction)
 
     n = len(dataset)
     return {
         'doc_recall_at_k': recalls / n,
         'avg_best_snippet_sim': sum(best_jaccards) / n if best_jaccards else 0.0,
         'avg_best_snippet_cosine': sum(best_cosines) / n if best_cosines else 0.0,
+        'category_filtering_effectiveness': sum(category_filtered_precision) / len(category_filtered_precision) if category_filtered_precision else 0.0,
+        'avg_search_space_reduction': sum(search_space_reductions) / len(search_space_reductions) if search_space_reductions else 0.0,
+    }
+
+
+def compute_large_document_metrics(results: List[ExampleResult]) -> Dict[str, Any]:
+    """
+    Compute metrics specific to larger document sets (120+ documents)
+    
+    Metrics:
+      - category_filtering_usage: percentage of queries using category filtering
+      - avg_search_space_reduction: average percentage reduction in search space
+      - category_distribution: distribution of queries across categories
+      - latency_by_category: average latency per category
+      - precision_by_category: average precision per category
+    """
+    if not results:
+        return {}
+    
+    # Category filtering usage
+    filtered_queries = sum(1 for r in results if r.category_filter_used)
+    category_filtering_usage = filtered_queries / len(results)
+    
+    # Search space reduction
+    search_reductions = [r.total_docs_searched - r.filtered_docs_searched for r in results if r.category_filter_used]
+    avg_search_space_reduction = sum(search_reductions) / len(search_reductions) if search_reductions else 0.0
+    
+    # Category distribution
+    category_counts = {}
+    for r in results:
+        cat = r.category_name or "unknown"
+        category_counts[cat] = category_counts.get(cat, 0) + 1
+    
+    # Latency and precision by category
+    latency_by_category = {}
+    precision_by_category = {}
+    for r in results:
+        cat = r.category_name or "unknown"
+        if cat not in latency_by_category:
+            latency_by_category[cat] = []
+            precision_by_category[cat] = []
+        latency_by_category[cat].append(r.latency_s)
+        precision_by_category[cat].append(r.retrieval_precision)
+    
+    # Calculate averages
+    for cat in latency_by_category:
+        latency_by_category[cat] = sum(latency_by_category[cat]) / len(latency_by_category[cat])
+        precision_by_category[cat] = sum(precision_by_category[cat]) / len(precision_by_category[cat])
+    
+    return {
+        'category_filtering_usage': category_filtering_usage,
+        'avg_search_space_reduction': avg_search_space_reduction,
+        'category_distribution': category_counts,
+        'latency_by_category': latency_by_category,
+        'precision_by_category': precision_by_category,
+        'total_queries': len(results),
+        'filtered_queries': filtered_queries
     }
 
 
@@ -215,6 +306,26 @@ def compute_metrics(dataset: List[Dict[str, Any]], sent_threshold: float = 0.60)
         support_scores.append(sr)
         avg_ctx_sims.append(acs)
         latencies.append(row.get('latency_s', 0.0))
+        # Extract additional metrics for larger document sets
+        raw = row.get('raw', {})
+        category_filter_used = 'category_filter' in raw and raw['category_filter'] is not None
+        category_name = raw.get('category_filter', 'none')
+        total_docs_searched = raw.get('total_docs', len(contexts))
+        filtered_docs_searched = raw.get('filtered_docs', total_docs_searched)
+        
+        # Calculate precision and recall
+        relevant_sources = set(row.get('sources_extracted', []))
+        retrieved_sources = set([r.get('source', '') for r in raw.get('results', [])])
+        if retrieved_sources:
+            retrieval_precision = len(relevant_sources & retrieved_sources) / len(retrieved_sources)
+        else:
+            retrieval_precision = 0.0
+        
+        if relevant_sources:
+            retrieval_recall = len(relevant_sources & retrieved_sources) / len(relevant_sources)
+        else:
+            retrieval_recall = 0.0
+        
         per_example.append(ExampleResult(
             question=row['question'],
             answer=answer[:4000],
@@ -222,8 +333,16 @@ def compute_metrics(dataset: List[Dict[str, Any]], sent_threshold: float = 0.60)
             retrieval_contexts=contexts,
             support_ratio=sr,
             avg_ctx_similarity=acs,
-            latency_s=row.get('latency_s', 0.0)
+            latency_s=row.get('latency_s', 0.0),
+            # Additional metrics for larger document sets
+            category_filter_used=category_filter_used,
+            category_name=category_name,
+            total_docs_searched=total_docs_searched,
+            filtered_docs_searched=filtered_docs_searched,
+            retrieval_precision=retrieval_precision,
+            retrieval_recall=retrieval_recall
         ))
+    # Standard metrics
     metrics = {
         'num_examples': len(dataset),
         'avg_support_ratio': sum(support_scores)/len(support_scores) if support_scores else 0.0,
@@ -231,6 +350,11 @@ def compute_metrics(dataset: List[Dict[str, Any]], sent_threshold: float = 0.60)
         'p95_latency_s': sorted(latencies)[int(0.95*len(latencies))-1] if latencies else 0.0,
         'median_latency_s': sorted(latencies)[len(latencies)//2] if latencies else 0.0,
     }
+    
+    # Add large document set specific metrics
+    large_doc_metrics = compute_large_document_metrics(per_example)
+    metrics.update(large_doc_metrics)
+    
     return metrics, per_example
 
 
