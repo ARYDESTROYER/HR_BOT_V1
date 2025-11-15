@@ -1,32 +1,44 @@
-# 🚀 Quick Start Guide
+# 🚀 Quick Start Guide — HR Bot v6.0
 
 ## Prerequisites Check
 
 Before starting, ensure you have:
-- ✅ Python 3.10 - 3.13 installed
-- ✅ UV package manager installed
-- ✅ Google API key for Gemini
-- ✅ HR documents in .docx format
+- ✅ Python 3.10 - 3.13 installed (3.12 recommended)
+- ✅ `uv` package manager installed
+- ✅ AWS credentials if using Amazon Bedrock (recommended)
+- ✅ Optional: Google/OpenRouter API key if using Gemini
+- ✅ HR documents in `.docx` format
 
 ## Step-by-Step Setup
 
-### 1. Install Dependencies
+### 1. Install Dependencies (recommended sequence)
+
+Run the following commands from your local machine. `uv sync` creates and manages a project-local virtual environment at `.venv` by default — you do not need to create a venv manually.
 
 ```bash
-# Navigate to the project directory
-cd hr_bot
+# 1) Change to the repository root
+cd /path/to/HR_BOT_V1
 
-# Install all dependencies
+# 2) Sync and create the project virtualenv and install pinned deps
+uv sync
+
+# 3) Install CrewAI tooling (installs CLI helpers and any optional system packages)
 crewai install
 
-# This will install:
-# - CrewAI framework
-# - Langchain & Google AI integration
-# - FAISS vector database
-# - BM25 search
-# - Document processing libraries
-# - Caching and utilities
+# 4) Run the development UI (or replace with your production start)
+crewai run
 ```
+
+Optional: to include the legacy Streamlit UI (rollback only):
+
+```bash
+# Install with legacy extras to bring in Streamlit
+uv sync --extra legacy
+```
+
+Notes:
+- Chainlit is the production UI; Streamlit is kept as an optional legacy UI for emergency rollback.
+- `uv sync` will create a `.venv/` directory in the project root and install packages there. Do not remove or alter the primary `.env` file in this repository unless intentionally configuring runtime secrets.
 
 ### 2. Configure Environment
 
@@ -126,10 +138,10 @@ hr_bot_interactive
 📝 Response:
 According to the Sickness and Absence Policy document:
 
-1. **Sick Leave Allowance**: Employees are entitled to [X] days 
+1. **Sick Leave Allowance**: Employees are entitled to [X] days
    of paid sick leave per year.
 
-2. **Notification Process**: 
+2. **Notification Process**:
    - Notify your manager as soon as possible
    - Provide medical certificate for absences over 3 days
 
@@ -186,7 +198,7 @@ hr_bot "Get information about the Marketing department"
 
 ### For Best Results
 
-1. **Be Specific**: 
+1. **Be Specific**:
    - ❌ "Tell me about leave"
    - ✅ "What is the maternity leave policy?"
 
@@ -277,8 +289,8 @@ echo "GOOGLE_API_KEY=your_key_here" >> .env
 
 **Solution:**
 ```bash
-# Reinstall dependencies
-crewai install
+# Reinstall dependencies using uv
+uv sync
 
 # Or manually
 pip install -e .
@@ -320,7 +332,7 @@ TOP_K_RESULTS=3
    ```bash
    hr_bot "test" > /dev/null
    ```
-   
+
 2. **Use SSD storage** for cache/indexes
 
 3. **Set appropriate cache TTL**:
@@ -350,9 +362,29 @@ TOP_K_RESULTS=3
 - [Gemini API Guide](https://ai.google.dev/docs)
 - [API Deck Integration](https://developers.apideck.com/docs)
 
+## Known Issues & Probable Causes (v6.0)
+
+This section captures known behaviors observed during v6.x migrations and probable causes to help troubleshooting.
+
+- 401 / Refresh loops after OAuth sign-in:
+   - Probable causes: user not present in `EXECUTIVE_EMAILS`/`EMPLOYEE_EMAILS`, `CHAINLIT_AUTH_SECRET` mismatch, or session cookie invalidation after secret rotation.
+   - Mitigation: verify server logs for `OAuth login rejected` messages; add email to the correct allow-list or enable `ALLOW_DEV_LOGIN` for short-term debugging.
+
+- Translation keys render raw tokens (e.g., `: credentialssignin`):
+   - Probable causes: translation bundle for the client's selected language did not include the key at the time the toast was shown, or casing differences between server `detail` and client translation keys.
+   - Mitigation: ensure project translations under `.chainlit/translations/` include the key and confirm client requested language bundle contains it.
+
+- Index build fails or appears slow:
+   - Probable causes: insufficient disk space, permissions, or large documents overloading memory during embedding.
+   - Mitigation: monitor disk and memory, reduce `CHUNK_SIZE`, and prebuild indexes on a machine with more resources.
+
+- Provider selection confusion (Bedrock vs Gemini/OpenRouter):
+   - Probable causes: multiple provider env vars set simultaneously (e.g., `BEDROCK_MODEL` and `OPENROUTER_API_KEY`), causing unexpected provider selection.
+   - Mitigation: only populate env vars for the provider you intend to use, and document active provider in your deployment notes.
+
 ## 💬 Need Help?
 
-- Check the main README.md
+- Check the main `README.md`
 - Review troubleshooting section
 - Open an issue on GitHub
 - Join CrewAI Discord community

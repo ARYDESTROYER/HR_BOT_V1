@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Literal
 import os
 import logging
 
@@ -39,7 +40,25 @@ def _clear_query_params():
             pass
 
 
-# Custom in-app PKCE OAuth removed — use Streamlit built-in `st.login()` / `st.user` only.
+def _set_page_mode(mode: Literal["auth", "app"]) -> None:
+    """Toggle a CSS hook on the document body for auth vs. app layouts."""
+    target = mode if mode in {"auth", "app"} else "app"
+    st.markdown(
+        f"""
+        <script>
+        (function() {{
+            const body = window.parent?.document?.body;
+            if (!body) return;
+            body.classList.remove('page-auth', 'page-app');
+            body.classList.add('page-{target}');
+        }})();
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# Custom in-app PKCE OAuth removed -- use Streamlit built-in `st.login()` / `st.user` only.
 
 # ============================================================================
 # AUTHENTICATION CHECK - USING STREAMLIT'S BUILT-IN OAUTH
@@ -183,280 +202,17 @@ def _get_current_email() -> Optional[str]:
     # If nothing found, return None (do not return sentinel like 'unknown')
     return None
 
-def ensure_authenticated() -> bool:
-    """Check authentication using Streamlit's built-in OAuth."""
-    # If we already have a logged in email from an earlier OAuth flow, use it
-    if st.session_state.get("logged_in_email"):
-        # Short-circuit: derive role from persisted email
-        user_email = st.session_state.get("logged_in_email")
-        # Validate persisted email before using it
-        if not user_email or '@' not in str(user_email):
-            # Clear any invalid persisted login and prompt the user to sign in again
-            try:
-                st.session_state.pop('logged_in_email', None)
-            except Exception:
-                pass
-            st.info("We couldn't read your previous login. Please sign in with Google to continue.")
-            return False
-        # Optional debug (controlled by env flag)
-        if os.getenv("DEBUG_AUTH", "false").lower() in ("1", "true", "yes"):
-            st.sidebar.write("DEBUG st.user:", getattr(st, "user", None))
-            try:
-                if getattr(st, 'user', None):
-                    try:
-                        st.sidebar.json(dict(st.user))
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
-        st.sidebar.markdown("### Debug: User Info")
-        st.sidebar.markdown(f"**Extracted Email:** {user_email}")
-        user_role = _derive_role(user_email)
-        if user_role == 'unauthorized':
-            st.error(f"Access denied for {user_email}. Please contact your administrator.")
-            st.sidebar.markdown(f"**Role:** {user_role}")
-            return False
-        st.sidebar.markdown(f"**Role:** {user_role}")
-        return True
-
-    # Rely on Streamlit's built-in `st.login()` / `st.user` identity cookie.
-    # The Streamlit runtime will populate `st.user` after a successful
-    # `st.login()` flow; we do not perform manual code exchanges here.
-
-    # Developer auto-login (local testing convenience)
-    allow_dev_env = os.getenv("ALLOW_DEV_LOGIN", "false").lower() in ("1", "true", "yes")
-    dev_email_env = os.getenv("DEV_TEST_EMAIL", "").strip().lower()
-    # Try to extract any email-like attribute from Streamlit's `st.user` object
-    st_user_email = None
-    try:
-        if getattr(st, 'user', None):
-            # Follow required extraction order here as a quick-guess (dropped validation will occur later)
-            try:
-                if hasattr(st.user, 'email') and st.user.email:
-                    st_user_email = str(st.user.email).strip().lower()
-                elif hasattr(st.user, 'preferred_username') and st.user.preferred_username:
-                    st_user_email = str(st.user.preferred_username).strip().lower()
-                elif hasattr(st.user, 'name') and st.user.name and '@' in str(st.user.name):
-                    st_user_email = str(st.user.name).strip().lower()
-                elif hasattr(st.user, 'sub') and st.user.sub and '@' in str(st.user.sub):
-                    st_user_email = str(st.user.sub).strip().lower()
-            except Exception:
-                st_user_email = None
-    except Exception:
-        st_user_email = None
-
-    if allow_dev_env and dev_email_env and not st.session_state.get("logged_in_email") and not st_user_email:
-        # Auto-populate the session for local developer testing to avoid 'unknown' access
-        st.session_state["dev_email"] = dev_email_env
-        st.session_state["logged_in_email"] = dev_email_env
-        st.sidebar.markdown("**Developer auto-login enabled (from DEV_TEST_EMAIL)**")
-        return True
-
-    # If user is not logged in, show login button / OAuth option
-        if not st.user:
-                # Polished login card: centered, clear title, short description, and supportive note
-                st.markdown(
-                        """
-                        <style>
-                        .login-card{display:flex;align-items:center;justify-content:center;margin-top:2.5rem;padding:0 1rem}
-                        .login-inner{background:linear-gradient(180deg,#ffffff, #fbfbff);box-shadow:0 10px 40px rgba(30,30,60,0.08);border-radius:14px;padding:40px;max-width:740px;width:100%;}
-                        .brand-row{display:flex;align-items:center;gap:16px;margin-bottom:8px}
-                        .brand-title{font-size:34px;font-weight:800;margin:0;background:linear-gradient(90deg,#2b2f7a,#6f6fe8);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-                        .brand-sub{color:#6b6b80;margin-top:6px;margin-bottom:20px}
-                        .login-actions{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:18px}
-                        .legal-note{color:#9aa0b4;font-size:12px;margin-top:12px;text-align:center}
-                        /* Google-like button styling for Streamlit buttons */
-                        .stButton>button{background:#fff;border:1px solid #dcdfe6;color:#202124;padding:10px 14px;border-radius:10px;display:inline-flex;align-items:center;gap:10px;box-shadow:none;font-weight:600}
-                        .stButton>button:hover{box-shadow:0 2px 6px rgba(60,64,67,0.08)}
-                        .stButton>button:active{transform:translateY(1px)}
-                        /* Add left padding to visually reserve space for an icon */
-                        .stButton>button{padding-left:48px}
-                        /* Decorative pseudo-icon using radial-gradient to mimic multicolor mark */
-                        .stButton>button::before{content:'';width:20px;height:20px;border-radius:4px;margin-left:-36px;margin-right:12px;display:inline-block;background-image:linear-gradient(45deg,#4285F4 0%,#34A853 50%,#FBBC05 75%,#EA4335 100%)}
-                        @media (max-width:520px){.login-inner{padding:22px}.brand-title{font-size:22px}}
-                        /* entrance animation */
-                        @keyframes liftFade {
-                            0% {opacity:0; transform: translateY(14px) scale(0.995)}
-                            100% {opacity:1; transform: translateY(0) scale(1)}
-                        }
-                        .login-inner{animation: liftFade 420ms cubic-bezier(.2,.9,.2,1) both}
-                        .privacy-link{color:#6b6b80;font-size:13px;text-decoration:none;border-bottom:1px dotted rgba(107,107,128,0.25);padding-bottom:2px}
-                        </style>
-
-                        <div class="login-card">
-                            <div class="login-inner">
-                                <div class="brand-row" style="justify-content:center;">
-                                    <div>
-                                        <div class="brand-title">Inara</div>
-                                        <div class="brand-sub">HR Assistant — Secure access to company policies and documents.</div>
-                                    </div>
-                                </div>
-                                <div style="color:#333333;font-size:15px;line-height:1.45;text-align:center">
-                                    Sign in with your company Google account to continue. Access is restricted to authorized employees only.
-                                </div>
-                                <div class="login-actions">
-                                    <!-- placeholder for Streamlit buttons; real interactive buttons render below -->
-                                </div>
-                                <div class="legal-note">By signing in you agree to your company's acceptable use policy. Your login is securely handled by Google.</div>
-                            </div>
-                        </div>
-                        <div style="text-align:center;margin-top:12px">
-                            <a class="privacy-link" href="#" target="_blank">Privacy &amp; Policies</a>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                )
-        # Prefer Streamlit's built-in OIDC when configured via .streamlit/secrets.toml
-        try:
-            auth_section = None
-            try:
-                auth_section = st.secrets.get("auth") if hasattr(st, "secrets") else None
-            except Exception:
-                auth_section = None
-
-            if auth_section:
-                # If a provider named 'google' is configured, show a dedicated button
-                providers = []
-                try:
-                    providers = list(auth_section.keys())
-                except Exception:
-                    providers = []
-
-                if "google" in providers:
-                    # Center the sign-in button under the card for a cleaner look
-                    left, mid, right = st.columns([1, 2, 1])
-                    with mid:
-                        if st.button("Sign in with Google"):
-                            try:
-                                st.login("google")
-                            except Exception:
-                                try:
-                                    st.login()
-                                except Exception:
-                                    pass
-
-                    return False
-                else:
-                    # Generic built-in login (first provider)
-                    try:
-                        st.login()
-                        return False
-                    except Exception:
-                        # fall through to developer fallback if st.login isn't available
-                        pass
-
-            # No Streamlit built-in provider configured: offer developer fallback only
-            allow_dev = os.getenv("ALLOW_DEV_LOGIN", "false").lower() in ("1", "true", "yes")
-            if allow_dev:
-                st.warning("Developer fallback enabled. Only use this locally.")
-                dev_email = st.text_input("Developer email (for local testing)", value=os.getenv("DEV_TEST_EMAIL", ""))
-                # Keep developer button centered as well
-                l, m, r = st.columns([1, 2, 1])
-                with m:
-                    if st.button("Sign in (dev)") and dev_email:
-                        st.session_state["dev_email"] = dev_email.strip().lower()
-                        st.session_state["logged_in_email"] = dev_email.strip().lower()
-                        return True
-            else:
-                st.info("Sign in is not available in this environment. Configure Streamlit OIDC via `.streamlit/secrets.toml`.")
-
-            return False
-        except Exception:
-            # Fallback: developer login
-            allow_dev = os.getenv("ALLOW_DEV_LOGIN", "false").lower() in ("1", "true", "yes")
-            if allow_dev:
-                st.warning("Developer fallback enabled. Only use this locally.")
-                dev_email = st.text_input("Developer email (for local testing)", value=os.getenv("DEV_TEST_EMAIL", ""))
-                if st.button("Sign in (dev)") and dev_email:
-                    st.session_state["dev_email"] = dev_email.strip().lower()
-                    st.session_state["logged_in_email"] = dev_email.strip().lower()
-                    return True
-            else:
-                st.info("Sign in is not available in this environment. Configure Streamlit OIDC or enable developer login.")
-
-            return False
-
-    # User is authenticated, check RBAC
-    # Optional debug sidebar controlled by env var
-    if os.getenv("DEBUG_AUTH", "false").lower() in ("1", "true", "yes"):
-        st.sidebar.write("DEBUG st.user:", getattr(st, "user", None))
-        if getattr(st, 'user', None):
-            try:
-                st.sidebar.json(dict(st.user))
-            except Exception:
-                pass
-
-    # Extract email from session / st.user / env (safe)
-    user_email = _get_current_email()
-
-    # If st.user exists but we couldn't determine a usable email, show clear message and
-    # offer a retry using Streamlit's login so the user can re-run the provider flow.
-    if getattr(st, 'user', None) and (not user_email or '@' not in user_email):
-        # Friendly non-blocking message and clear CTA to re-run the provider flow
-        try:
-            st.session_state.pop('logged_in_email', None)
-        except Exception:
-            pass
-        st.info("Please complete sign-in with Google so we can verify your company account.")
-        # Offer a retry button to trigger the provider login again (safe no-op if not configured)
-        try:
-            col_a, col_b = st.columns([1, 1])
-            with col_a:
-                if st.button("Sign in with Google"):
-                    try:
-                        st.login("google")
-                    except Exception:
-                        try:
-                            st.login()
-                        except Exception:
-                            pass
-            with col_b:
-                # Provide developer fallback option if enabled
-                if os.getenv("ALLOW_DEV_LOGIN", "false").lower() in ("1", "true", "yes"):
-                    if st.button("Use developer login"):
-                        dev_email = os.getenv("DEV_TEST_EMAIL", "")
-                        if dev_email:
-                            st.session_state['dev_email'] = dev_email.strip().lower()
-                            st.session_state['logged_in_email'] = dev_email.strip().lower()
-                            st.experimental_rerun()
-        except Exception:
-            pass
-        return False
-
-    # Persist the extracted email into session state for later short-circuiting
-    try:
-        if user_email and not st.session_state.get('logged_in_email'):
-            st.session_state['logged_in_email'] = user_email
-    except Exception:
-        pass
-
-    # Before deriving roles, validate extracted email
-    if not user_email or '@' not in user_email:
-        # If we still don't have an email, show a friendly prompt instead of a red error
-        st.info("We couldn't determine your login email. Please sign in to continue.")
-        return False
-
-    # Now derive role and enforce RBAC
-    user_role = _derive_role(user_email)
-    if user_role == 'unauthorized':
-        st.error(f"Access denied for {user_email}. Please contact your administrator.")
-        st.sidebar.markdown(f"**Role:** {user_role}")
-        return False
-
-    st.sidebar.markdown(f"**Extracted Email:** {user_email}")
-    st.sidebar.markdown(f"**Role:** {user_role}")
-    return True
-
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
 
 PAGE_TITLE = "Inara - HR Assistant"
-PAGE_ICON = "💼"
+PAGE_ICON = None
 DATA_DIR = Path("data").resolve()
 DEFAULT_PLACEHOLDER = "Ask me anything about HR policies, benefits, or procedures..."
-
+SUPPORT_CONTACT_EMAIL = os.getenv("SUPPORT_CONTACT_EMAIL", "support@company.com")
+ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+THEME_CSS_PATH = ASSETS_DIR / "ui.css"
 WARMUP_QUERIES: List[str] = [
     "What is the sick leave policy?",
     "How do I request paternity leave?",
@@ -485,899 +241,187 @@ WARMUP_QUERIES: List[str] = [
     "What happens during a return-to-work interview?",
 ]
 
+
+@dataclass
+class AuthContext:
+    status: Literal["unauthenticated", "loading", "denied", "authenticated"]
+    email: Optional[str] = None
+    role: Optional[str] = None
+
+
+def _inject_theme_css() -> None:
+    """Inject shared UI stylesheet."""
+    css_cache_key = "_inara_theme_css"
+    css_markup: Optional[str] = st.session_state.get(css_cache_key)
+    if css_markup is None:
+        try:
+            css_text = THEME_CSS_PATH.read_text()
+            css_markup = f"<style>{css_text}</style>"
+            st.session_state[css_cache_key] = css_markup
+        except FileNotFoundError:
+            logging.warning("Theme CSS not found at %s", THEME_CSS_PATH)
+            return
+    st.markdown(css_markup, unsafe_allow_html=True)
+
+
+def _resolve_auth_context() -> AuthContext:
+    """Resolve current authentication status from Streamlit identity."""
+    auth_pending = bool(st.session_state.get("_auth_pending"))
+    stored_email = st.session_state.get("logged_in_email")
+    if stored_email:
+        role = _derive_role(stored_email)
+        if role == "unauthorized":
+            st.session_state.pop("logged_in_email", None)
+            st.session_state["_auth_pending"] = False
+            return AuthContext(status="denied", email=stored_email, role=role)
+        st.session_state["_auth_pending"] = False
+        return AuthContext(status="authenticated", email=stored_email, role=role)
+
+    resolved_email = _get_current_email()
+    if resolved_email:
+        role = _derive_role(resolved_email)
+        if role == "unauthorized":
+            st.session_state["_auth_pending"] = False
+            return AuthContext(status="denied", email=resolved_email, role=role)
+        st.session_state["logged_in_email"] = resolved_email
+        st.session_state["_auth_pending"] = False
+        return AuthContext(status="authenticated", email=resolved_email, role=role)
+
+    user_obj = getattr(st, "user", None)
+    if auth_pending and user_obj:
+        return AuthContext(status="loading")
+
+    st.session_state.pop("_auth_pending", None)
+    return AuthContext(status="unauthenticated")
+
+
+def render_login_screen() -> None:
+    """Render hero-style Google login screen."""
+    st.markdown("<div class='inara-auth-container'><div class='inara-auth-card'>", unsafe_allow_html=True)
+    col_brand, col_action = st.columns([1.35, 1])
+    with col_brand:
+        st.markdown(
+            """
+            <div class="inara-brand-block">
+                <div class="inara-auth-chip">Google Workspace · SSO enforced</div>
+                <h1>Inara HR Assistant</h1>
+                <p>
+                    One secure gateway for policies, benefits, and people workflows. Stay aligned with
+                    executive-only briefings while giving every employee the clarity they need.
+                </p>
+                <ul class="inara-auth-perks">
+                    <li>Enterprise-grade access control</li>
+                    <li>Executive and employee briefings in one place</li>
+                    <li>Live HR knowledge updated from S3</li>
+                </ul>
+                <div class="inara-auth-meta">
+                    <span>24/7 Copilot coverage</span>
+                    <span>Backed by secure audit trails</span>
+                    <span>Internal-only documents</span>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with col_action:
+        st.markdown("<div class='inara-action-block'>", unsafe_allow_html=True)
+        st.markdown(
+            """
+            <div class="inara-action-header">
+                <h3>Sign in to continue</h3>
+                <p>Use your corporate Google identity. No personal accounts are allowed.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button("Sign in with Google", key="auth_google", use_container_width=True):
+            try:
+                st.session_state["_auth_pending"] = True
+                st.login("google")
+            except Exception:
+                st.session_state["_auth_pending"] = True
+                st.login()
+        st.markdown(
+            f"""<div class='inara-support-link'>Need help signing in? <a href='mailto:{SUPPORT_CONTACT_EMAIL}'>Contact support</a></div>""",
+            unsafe_allow_html=True,
+        )
+        allow_dev = os.getenv("ALLOW_DEV_LOGIN", "false").lower() in ("1", "true", "yes")
+        if allow_dev:
+            dev_email = st.text_input(
+                "Developer email (local testing)",
+                value=os.getenv("DEV_TEST_EMAIL", ""),
+                placeholder="dev@company.com",
+            )
+            if st.button("Dev sign-in", key="dev_login", use_container_width=True) and dev_email:
+                st.session_state["logged_in_email"] = dev_email.strip().lower()
+                st.session_state["_auth_pending"] = False
+                _rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
+def render_auth_loading(message: str = "Verifying your session...") -> None:
+    st.markdown(
+        f"""
+        <div class='inara-auth-container'>
+            <div class='inara-auth-card'>
+                <div class='inara-brand-block'>
+                    <h1>Hold on a moment</h1>
+                    <p>{message}</p>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_access_denied(email: str | None) -> None:
+    st.markdown(
+        f"""
+        <div class='inara-auth-container'>
+            <div class='inara-auth-card'>
+                <div class='inara-error-card'>
+                    <h3>Access denied</h3>
+                    <p>Access denied for <strong>{email or 'this account'}</strong>. Only authorized company emails can use Inara.</p>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    col_retry, col_support = st.columns([1, 1])
+    with col_retry:
+        if st.button("Try a different account", use_container_width=True):
+            st.session_state.pop("logged_in_email", None)
+            st.session_state.pop("_auth_pending", None)
+            try:
+                st.logout()
+            except Exception:
+                _clear_query_params()
+            _rerun()
+    with col_support:
+        st.link_button("Contact support", f"mailto:{SUPPORT_CONTACT_EMAIL}", use_container_width=True)
+
+
+def render_dashboard_header(user_name: str, role: str) -> None:
+    st.markdown(
+        f"""
+        <div class='inara-role-banner'>
+            <div>
+                <div style="font-size:1.2rem;font-weight:600;">Welcome back, {user_name}</div>
+                <div style="color:var(--text-secondary);">How can Inara help you today?</div>
+            </div>
+            <div class='inara-role-badge'>{role.title()} Access</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 # ============================================================================
 # MINIMAL PROFESSIONAL STYLING 
 # ============================================================================
-
-MINIMAL_CSS = """
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    
-    /* ==================== THEME TOGGLE BUTTON - ELEGANT & FIXED ==================== */
-    .theme-toggle-container {
-        position: fixed;
-        top: 1.5rem;
-        right: 2rem;
-        z-index: 9999;
-        animation: fadeIn 0.6s ease-out 0.4s both;
-    }
-    
-    .theme-toggle {
-        width: 48px;
-        height: 48px;
-        border-radius: 12px;
-        background: linear-gradient(135deg, rgba(120, 119, 198, 0.15) 0%, rgba(155, 143, 217, 0.1) 100%);
-        border: 1.5px solid rgba(120, 119, 198, 0.4);
-        backdrop-filter: blur(12px);
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: 0 4px 16px rgba(120, 119, 198, 0.15), 0 2px 4px rgba(0, 0, 0, 0.1);
-        padding: 0;
-        outline: none;
-    }
-    
-    .theme-toggle:hover {
-        transform: translateY(-2px) scale(1.05);
-        border-color: rgba(120, 119, 198, 0.6);
-        background: linear-gradient(135deg, rgba(120, 119, 198, 0.25) 0%, rgba(155, 143, 217, 0.2) 100%);
-        box-shadow: 0 8px 28px rgba(120, 119, 198, 0.3), 0 4px 8px rgba(0, 0, 0, 0.15);
-    }
-    
-    .theme-toggle:active {
-        transform: translateY(0) scale(0.98);
-    }
-    
-    .theme-toggle span {
-        font-size: 22px;
-        filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
-        transition: all 0.3s ease;
-    }
-    
-    .light-theme .theme-toggle {
-        background: linear-gradient(135deg, rgba(120, 119, 198, 0.12) 0%, rgba(155, 143, 217, 0.08) 100%);
-        border: 1.5px solid rgba(120, 119, 198, 0.3);
-        box-shadow: 0 4px 16px rgba(120, 119, 198, 0.12), 0 2px 4px rgba(0, 0, 0, 0.05);
-    }
-    
-    .light-theme .theme-toggle:hover {
-        background: linear-gradient(135deg, rgba(120, 119, 198, 0.2) 0%, rgba(155, 143, 217, 0.15) 100%);
-        box-shadow: 0 8px 28px rgba(120, 119, 198, 0.2), 0 4px 8px rgba(0, 0, 0, 0.08);
-    }
-    
-    /* ==================== CLEAR CACHE BUTTON - ELEGANT STYLING ==================== */
-    .clear-cache-container button {
-        all: unset;
-        height: 48px;
-        padding: 0 1.5rem;
-        border-radius: 12px;
-        background: linear-gradient(135deg, rgba(231, 76, 60, 0.15) 0%, rgba(192, 57, 43, 0.1) 100%);
-        border: 1.5px solid rgba(231, 76, 60, 0.4);
-        backdrop-filter: blur(12px);
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.5rem;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: 0 4px 16px rgba(231, 76, 60, 0.15), 0 2px 4px rgba(0, 0, 0, 0.1);
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: #e74c3c;
-        letter-spacing: 0.01em;
-        white-space: nowrap;
-    }
-    
-    .clear-cache-container button:hover {
-        transform: translateY(-2px) scale(1.02);
-        border-color: rgba(231, 76, 60, 0.6);
-        background: linear-gradient(135deg, rgba(231, 76, 60, 0.25) 0%, rgba(192, 57, 43, 0.2) 100%);
-        box-shadow: 0 8px 28px rgba(231, 76, 60, 0.3), 0 4px 8px rgba(0, 0, 0, 0.15);
-        color: #c0392b;
-    }
-    
-    .clear-cache-container button:active {
-        transform: translateY(0) scale(0.98);
-    }
-    
-    .light-theme .clear-cache-container button {
-        background: linear-gradient(135deg, rgba(231, 76, 60, 0.12) 0%, rgba(192, 57, 43, 0.08) 100%);
-        border: 1.5px solid rgba(231, 76, 60, 0.3);
-        box-shadow: 0 4px 16px rgba(231, 76, 60, 0.12), 0 2px 4px rgba(0, 0, 0, 0.05);
-        color: #c0392b;
-    }
-    
-    .light-theme .clear-cache-container button:hover {
-        background: linear-gradient(135deg, rgba(231, 76, 60, 0.2) 0%, rgba(192, 57, 43, 0.15) 100%);
-        box-shadow: 0 8px 28px rgba(231, 76, 60, 0.2), 0 4px 8px rgba(0, 0, 0, 0.08);
-        color: #a93226;
-    }
-    
-    /* ==================== ACTION BUTTONS CONTAINER - PROFESSIONAL LAYOUT ==================== */
-    .action-buttons-container {
-        position: fixed;
-        top: 1.5rem;
-        right: 5.5rem;
-        z-index: 9999;
-        display: flex;
-        gap: 0.75rem;
-        animation: fadeIn 0.6s ease-out 0.4s both;
-    }
-    
-    /* ==================== S3 REFRESH BUTTON - ELEGANT STYLING ==================== */
-    .s3-refresh-container button {
-        all: unset;
-        height: 48px;
-        padding: 0 1.5rem;
-        border-radius: 12px;
-        background: linear-gradient(135deg, rgba(52, 152, 219, 0.15) 0%, rgba(41, 128, 185, 0.1) 100%);
-        border: 1.5px solid rgba(52, 152, 219, 0.4);
-        backdrop-filter: blur(12px);
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.5rem;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: 0 4px 16px rgba(52, 152, 219, 0.15), 0 2px 4px rgba(0, 0, 0, 0.1);
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: #3498db;
-        letter-spacing: 0.01em;
-        white-space: nowrap;
-    }
-    
-    .s3-refresh-container button:hover {
-        transform: translateY(-2px) scale(1.02);
-        border-color: rgba(52, 152, 219, 0.6);
-        background: linear-gradient(135deg, rgba(52, 152, 219, 0.25) 0%, rgba(41, 128, 185, 0.2) 100%);
-        box-shadow: 0 8px 28px rgba(52, 152, 219, 0.3), 0 4px 8px rgba(0, 0, 0, 0.15);
-        color: #2980b9;
-    }
-    
-    .s3-refresh-container button:active {
-        transform: translateY(0) scale(0.98);
-    }
-    
-    .light-theme .s3-refresh-container button {
-        background: linear-gradient(135deg, rgba(52, 152, 219, 0.12) 0%, rgba(41, 128, 185, 0.08) 100%);
-        border: 1.5px solid rgba(52, 152, 219, 0.3);
-        box-shadow: 0 4px 16px rgba(52, 152, 219, 0.12), 0 2px 4px rgba(0, 0, 0, 0.05);
-        color: #2980b9;
-    }
-    
-    .light-theme .s3-refresh-container button:hover {
-        background: linear-gradient(135deg, rgba(52, 152, 219, 0.2) 0%, rgba(41, 128, 185, 0.15) 100%);
-        box-shadow: 0 8px 28px rgba(52, 152, 219, 0.2), 0 4px 8px rgba(0, 0, 0, 0.08);
-        color: #21618c;
-    }
-    
-    /* ==================== FEEDBACK BUTTONS - ELEGANT DESIGN ==================== */
-    .assistant-message-container {
-        background: var(--card-bg);
-        border: 1px solid var(--card-border);
-        border-radius: 16px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    }
-    
-    .assistant-content {
-        color: var(--text-primary);
-        line-height: 1.7;
-    }
-    
-    .user-message {
-        background: linear-gradient(135deg, rgba(120, 119, 198, 0.15) 0%, rgba(155, 143, 217, 0.1) 100%);
-        border: 1px solid rgba(120, 119, 198, 0.25);
-        border-radius: 16px;
-        padding: 1.25rem 1.5rem;
-        margin: 1rem 0;
-        color: var(--text-primary);
-    }
-    
-    .feedback-container {
-        display: flex !important;
-        gap: 0.75rem;
-        margin-top: 1.5rem;
-        padding-top: 1.25rem;
-        border-top: 1px solid rgba(120, 119, 198, 0.15);
-        align-items: center;
-    }
-    
-    .feedback-label {
-        font-size: 0.875rem;
-        color: #b8b8b8 !important;
-        font-weight: 400;
-        margin-right: 0.25rem;
-    }
-    
-    .feedback-btn {
-        width: 38px !important;
-        height: 38px !important;
-        border-radius: 10px !important;
-        background: linear-gradient(135deg, rgba(26, 26, 46, 0.4) 0%, rgba(15, 15, 30, 0.5) 100%) !important;
-        border: 1px solid rgba(120, 119, 198, 0.2) !important;
-        cursor: pointer !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        backdrop-filter: blur(8px);
-    }
-    
-    .feedback-btn:hover {
-        transform: translateY(-2px) scale(1.08);
-        border-color: rgba(120, 119, 198, 0.4);
-        box-shadow: 0 4px 12px rgba(120, 119, 198, 0.15);
-    }
-    
-    .feedback-btn:active {
-        transform: translateY(0) scale(0.95);
-    }
-    
-    .feedback-btn.thumbs-up:hover {
-        background: linear-gradient(135deg, rgba(76, 175, 80, 0.15) 0%, rgba(56, 142, 60, 0.2) 100%);
-        border-color: rgba(76, 175, 80, 0.4);
-    }
-    
-    .feedback-btn.thumbs-down:hover {
-        background: linear-gradient(135deg, rgba(244, 67, 54, 0.15) 0%, rgba(211, 47, 47, 0.2) 100%);
-        border-color: rgba(244, 67, 54, 0.4);
-    }
-    
-    /* Radio-based selection (JS-free, reliable) */
-    .fb-radio { display: none; }
-
-    .fb-radio:checked + label.feedback-btn {
-        transform: scale(1.15) !important;
-        transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
-        box-shadow: 0 8px 24px rgba(120, 119, 198, 0.25);
-    }
-
-    .fb-radio:checked + label.thumbs-up {
-        background: linear-gradient(135deg, rgba(76, 175, 80, 0.5) 0%, rgba(56, 142, 60, 0.6) 100%) !important;
-        border-color: rgba(76, 175, 80, 0.9) !important;
-        box-shadow: 0 0 30px rgba(76, 175, 80, 0.7), 0 8px 25px rgba(0, 0, 0, 0.3) !important;
-    }
-
-    .fb-radio:checked + label.thumbs-up svg path {
-        stroke: #66BB6A !important;
-        opacity: 1 !important;
-        stroke-width: 3 !important;
-        filter: drop-shadow(0 0 10px rgba(76, 175, 80, 1));
-    }
-
-    .fb-radio:checked + label.thumbs-down {
-        background: linear-gradient(135deg, rgba(244, 67, 54, 0.5) 0%, rgba(211, 47, 47, 0.6) 100%) !important;
-        border-color: rgba(244, 67, 54, 0.9) !important;
-        box-shadow: 0 0 30px rgba(244, 67, 54, 0.7), 0 8px 25px rgba(0, 0, 0, 0.3) !important;
-    }
-
-    .fb-radio:checked + label.thumbs-down svg path {
-        stroke: #EF5350 !important;
-        opacity: 1 !important;
-        stroke-width: 3 !important;
-        filter: drop-shadow(0 0 10px rgba(244, 67, 54, 1));
-    }
-
-    .feedback-btn.selected {
-        transform: scale(1.15) !important;
-        transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
-    }
-    
-    .feedback-btn.thumbs-up.selected {
-        background: linear-gradient(135deg, rgba(76, 175, 80, 0.5) 0%, rgba(56, 142, 60, 0.6) 100%) !important;
-        border-color: rgba(76, 175, 80, 0.9) !important;
-        box-shadow: 0 0 30px rgba(76, 175, 80, 0.7), 0 8px 25px rgba(0, 0, 0, 0.3) !important;
-    }
-    
-    .feedback-btn.thumbs-up.selected svg path {
-        stroke: #66BB6A !important;
-        opacity: 1 !important;
-        stroke-width: 3 !important;
-        filter: drop-shadow(0 0 10px rgba(76, 175, 80, 1));
-    }
-    
-    .feedback-btn.thumbs-down.selected {
-        background: linear-gradient(135deg, rgba(244, 67, 54, 0.5) 0%, rgba(211, 47, 47, 0.6) 100%) !important;
-        border-color: rgba(244, 67, 54, 0.9) !important;
-        box-shadow: 0 0 30px rgba(244, 67, 54, 0.7), 0 8px 25px rgba(0, 0, 0, 0.3) !important;
-    }
-    
-    .feedback-btn.thumbs-down.selected svg path {
-        stroke: #EF5350 !important;
-        opacity: 1 !important;
-        stroke-width: 3 !important;
-        filter: drop-shadow(0 0 10px rgba(244, 67, 54, 1));
-    }
-    
-    .feedback-btn svg {
-        transition: all 0.3s ease;
-    }
-    
-    .feedback-btn:hover svg {
-        transform: scale(1.15);
-    }
-    
-    /* Light theme feedback buttons */
-    .light-theme .feedback-btn {
-        background: linear-gradient(135deg, rgba(248, 249, 250, 0.8) 0%, rgba(233, 236, 239, 0.9) 100%);
-        border: 1px solid rgba(120, 119, 198, 0.15);
-    }
-    
-    .light-theme .feedback-btn:hover {
-        box-shadow: 0 4px 12px rgba(120, 119, 198, 0.1);
-    }
-    
-    .light-theme .feedback-label {
-        color: #6c757d;
-    }
-    
-    @keyframes feedbackPulse {
-        0% {
-            transform: scale(1);
-        }
-        30% {
-            transform: scale(1.2);
-        }
-        50% {
-            transform: scale(1.15);
-        }
-        70% {
-            transform: scale(1.18);
-        }
-        100% {
-            transform: scale(1.05);
-        }
-    }
-    
-    /* ==================== GLOBAL RESET ==================== */
-    * {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    }
-    
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    
-    /* Remove edit buttons completely */
-    button[title="Copy message"],
-    button[title="Copy"],
-    button[aria-label*="Copy"],
-    [data-testid="stChatMessageCopyButton"],
-    .stChatMessage button {
-        display: none !important;
-    }
-    
-    /* ==================== THEME VARIABLES ==================== */
-    :root {
-        --bg-gradient-start: #1a1a2e;
-        --bg-gradient-mid: #0f0f1e;
-        --bg-gradient-end: #000000;
-        --text-primary: #e5e5e5;
-        --text-secondary: #a0a0a0;
-        --card-bg: rgba(26, 26, 46, 0.95);
-        --card-border: rgba(120, 119, 198, 0.2);
-        --accent-color: rgba(120, 119, 198, 0.5);
-    }
-    
-    .light-theme {
-        --bg-gradient-start: #f8f9fa;
-        --bg-gradient-mid: #e9ecef;
-        --bg-gradient-end: #dee2e6;
-        --text-primary: #212529;
-        --text-secondary: #6c757d;
-        --card-bg: rgba(255, 255, 255, 0.95);
-        --card-border: rgba(120, 119, 198, 0.15);
-        --accent-color: rgba(120, 119, 198, 0.7);
-    }
-    
-    /* ==================== DARK THEME BASE WITH RICH GRADIENT ==================== */
-    .main {
-        background: radial-gradient(ellipse at top, var(--bg-gradient-start) 0%, var(--bg-gradient-mid) 50%, var(--bg-gradient-end) 100%) !important;
-        color: var(--text-primary);
-        min-height: 100vh;
-        position: relative;
-        transition: background 0.4s ease, color 0.4s ease;
-    }
-    
-    /* Subtle animated background effect */
-    .main::before {
-        content: '';
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: 
-            radial-gradient(ellipse at 20% 30%, rgba(120, 119, 198, 0.05) 0%, transparent 50%),
-            radial-gradient(ellipse at 80% 70%, rgba(255, 107, 107, 0.03) 0%, transparent 50%);
-        pointer-events: none;
-        z-index: 0;
-    }
-    
-    .block-container {
-        padding-top: 3rem !important;
-        padding-bottom: 2rem !important;
-        max-width: 900px !important;
-        position: relative;
-        z-index: 1;
-    }
-    
-    /* ==================== HEADER - STUNNING GRADIENT TITLE ==================== */
-    h1 {
-        font-size: 2.5rem !important;
-        font-weight: 700 !important;
-        background: linear-gradient(135deg, #ffffff 0%, #a8a8ff 50%, #7877c6 100%) !important;
-        -webkit-background-clip: text !important;
-        -webkit-text-fill-color: transparent !important;
-        background-clip: text !important;
-        margin-bottom: 0.5rem !important;
-        letter-spacing: -0.04em !important;
-        animation: fadeInDown 0.6s ease-out;
-    }
-    
-    /* Subtitle with elegant styling */
-    [data-testid="stCaptionContainer"] {
-        font-size: 1.05rem !important;
-        color: #a0a0a0 !important;
-        font-weight: 400 !important;
-        margin-bottom: 2.5rem !important;
-        letter-spacing: 0.02em !important;
-        animation: fadeIn 0.8s ease-out 0.2s both;
-    }
-    
-    /* ==================== CHAT MESSAGES - ELEGANT BUBBLES WITH DEPTH ==================== */
-    .stChatMessage {
-        background: transparent !important;
-        padding: 1rem 0 !important;
-        border: none !important;
-        margin: 0.5rem 0 !important;
-    }
-    
-    /* User messages - sleek, right-aligned with subtle glow */
-    [data-testid="user"] {
-        display: flex;
-        justify-content: flex-end;
-    }
-    
-    [data-testid="user"] > div {
-        background: linear-gradient(135deg, rgba(120, 119, 198, 0.15) 0%, rgba(120, 119, 198, 0.08) 100%) !important;
-        border: 1px solid rgba(120, 119, 198, 0.25) !important;
-        color: #e8e8e8 !important;
-        padding: 1.1rem 1.5rem !important;
-        border-radius: 1.5rem 1.5rem 0.5rem 1.5rem !important;
-        max-width: 75% !important;
-        font-size: 0.975rem !important;
-        line-height: 1.65 !important;
-        box-shadow: 0 4px 12px rgba(120, 119, 198, 0.08), 0 2px 4px rgba(0, 0, 0, 0.15) !important;
-        backdrop-filter: blur(8px) !important;
-        transition: all 0.3s ease !important;
-    }
-    
-    [data-testid="user"] > div:hover {
-        border-color: rgba(120, 119, 198, 0.35) !important;
-        box-shadow: 0 6px 16px rgba(120, 119, 198, 0.12), 0 3px 6px rgba(0, 0, 0, 0.2) !important;
-        transform: translateY(-1px) !important;
-    }
-    
-    /* Assistant messages - premium card design with gradient border */
-    [data-testid="assistant"] {
-        display: flex;
-        justify-content: flex-start;
-    }
-    
-    [data-testid="assistant"] > div {
-        background: linear-gradient(135deg, var(--card-bg) 0%, var(--card-bg) 100%) !important;
-        color: var(--text-primary) !important;
-        padding: 2rem !important;
-        border-radius: 1.5rem !important;
-        max-width: 90% !important;
-        font-size: 0.975rem !important;
-        line-height: 1.75 !important;
-        border: 1px solid var(--card-border) !important;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25), 0 2px 8px rgba(0, 0, 0, 0.15) !important;
-        position: relative !important;
-        overflow: hidden !important;
-        backdrop-filter: blur(12px) !important;
-        transition: all 0.3s ease !important;
-    }
-    
-    /* Light theme adjustments for assistant messages */
-    .light-theme [data-testid="assistant"] > div {
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04) !important;
-    }
-    
-    .light-theme [data-testid="assistant"] > div:hover {
-        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1), 0 3px 6px rgba(0, 0, 0, 0.06) !important;
-    }
-    
-    /* Subtle gradient overlay on assistant messages */
-    [data-testid="assistant"] > div::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 2px;
-        background: linear-gradient(90deg, transparent, rgba(120, 119, 198, 0.5), transparent);
-        opacity: 0.6;
-    }
-    
-    [data-testid="assistant"] > div:hover {
-        border-color: rgba(255, 255, 255, 0.12) !important;
-        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.2) !important;
-        transform: translateY(-2px) !important;
-    }
-    
-    /* ==================== MESSAGE CONTENT STYLING - ENHANCED TYPOGRAPHY ==================== */
-    .stMarkdown {
-        color: #e8e8e8 !important;
-    }
-    
-    .stMarkdown p {
-        margin-bottom: 1.25rem !important;
-        line-height: 1.8 !important;
-        color: #e0e0e0 !important;
-    }
-    
-    .stMarkdown ul, .stMarkdown ol {
-        margin: 1.25rem 0 !important;
-        padding-left: 1.75rem !important;
-    }
-    
-    .stMarkdown li {
-        margin-bottom: 0.85rem !important;
-        line-height: 1.75 !important;
-        color: #d8d8d8 !important;
-    }
-    
-    .stMarkdown strong {
-        font-weight: 600 !important;
-        color: #ffffff !important;
-        text-shadow: 0 0 20px rgba(255, 255, 255, 0.15) !important;
-    }
-    
-    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
-        color: #ffffff !important;
-        font-weight: 600 !important;
-        margin-top: 2rem !important;
-        margin-bottom: 1.25rem !important;
-        letter-spacing: -0.02em !important;
-    }
-    
-    .stMarkdown h2 {
-        font-size: 1.4rem !important;
-        background: linear-gradient(135deg, #ffffff 0%, #c8c8c8 100%) !important;
-        -webkit-background-clip: text !important;
-        -webkit-text-fill-color: transparent !important;
-        background-clip: text !important;
-    }
-    
-    .stMarkdown h3 {
-        font-size: 1.15rem !important;
-        color: #f0f0f0 !important;
-    }
-    
-    .stMarkdown hr {
-        margin: 2.5rem 0 !important;
-        border: none !important;
-        height: 1px !important;
-        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent) !important;
-    }
-    
-    .stMarkdown code {
-        background: rgba(20, 20, 35, 0.8) !important;
-        color: #b8b8d8 !important;
-        padding: 0.25rem 0.6rem !important;
-        border-radius: 0.5rem !important;
-        font-size: 0.9rem !important;
-        font-family: 'SF Mono', 'Monaco', 'Courier New', monospace !important;
-        border: 1px solid rgba(120, 119, 198, 0.2) !important;
-        font-weight: 500 !important;
-    }
-    
-    /* Enhanced blockquote styling */
-    .stMarkdown blockquote {
-        border-left: 3px solid rgba(120, 119, 198, 0.5) !important;
-        padding-left: 1.5rem !important;
-        margin: 1.5rem 0 !important;
-        color: #c0c0c0 !important;
-        font-style: italic !important;
-        background: rgba(120, 119, 198, 0.03) !important;
-        padding: 1rem 1.5rem !important;
-        border-radius: 0.5rem !important;
-    }
-    
-    /* ==================== STATUS INDICATORS - REFINED ==================== */
-    .stChatMessage [data-testid="stInfo"] {
-        background: rgba(120, 119, 198, 0.08) !important;
-        border: 1px solid rgba(120, 119, 198, 0.15) !important;
-        border-radius: 0.75rem !important;
-        color: #a8a8a8 !important;
-        padding: 1rem 1.25rem !important;
-        font-size: 0.925rem !important;
-        font-weight: 400 !important;
-        backdrop-filter: blur(8px) !important;
-    }
-    
-
-    
-    /* ==================== INPUT AREA - PREMIUM GLASS MORPHISM ==================== */
-    .stChatInputContainer {
-        background: linear-gradient(135deg, rgba(35, 35, 60, 0.85) 0%, rgba(25, 25, 45, 0.9) 100%) !important;
-        border: 1px solid rgba(120, 119, 198, 0.25) !important;
-        border-radius: 1.75rem !important;
-        padding: 0.85rem 1.5rem !important;
-        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
-        backdrop-filter: blur(16px) !important;
-        box-shadow: 
-            0 8px 32px rgba(0, 0, 0, 0.3),
-            0 2px 8px rgba(0, 0, 0, 0.2),
-            inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
-        position: relative !important;
-    }
-    
-    /* Glow effect on focus */
-    .stChatInputContainer::before {
-        content: '';
-        position: absolute;
-        top: -2px;
-        left: -2px;
-        right: -2px;
-        bottom: -2px;
-        background: linear-gradient(135deg, rgba(120, 119, 198, 0.4), rgba(255, 107, 107, 0.2));
-        border-radius: 1.85rem;
-        opacity: 0;
-        transition: opacity 0.4s ease;
-        z-index: -1;
-    }
-    
-    .stChatInputContainer:focus-within::before {
-        opacity: 1;
-    }
-    
-    .stChatInputContainer:focus-within {
-        border-color: rgba(120, 119, 198, 0.45) !important;
-        box-shadow: 
-            0 12px 48px rgba(120, 119, 198, 0.15),
-            0 4px 16px rgba(0, 0, 0, 0.25),
-            inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
-        transform: translateY(-2px) scale(1.005) !important;
-    }
-    
-    .stChatInput textarea {
-        background: transparent !important;
-        color: #f0f0f0 !important;
-        font-size: 0.975rem !important;
-        line-height: 1.6 !important;
-        border: none !important;
-        caret-color: rgba(120, 119, 198, 0.8) !important;
-        font-weight: 400 !important;
-    }
-    
-    .stChatInput textarea::placeholder {
-        color: #888888 !important;
-        font-weight: 400 !important;
-        opacity: 0.8 !important;
-    }
-    
-    .stChatInput textarea:focus {
-        outline: none !important;
-        box-shadow: none !important;
-    }
-    
-    /* Send button enhancement (if visible) */
-    .stChatInputContainer button {
-        background: linear-gradient(135deg, rgba(120, 119, 198, 0.2), rgba(120, 119, 198, 0.3)) !important;
-        border: 1px solid rgba(120, 119, 198, 0.4) !important;
-        border-radius: 0.75rem !important;
-        color: #ffffff !important;
-        transition: all 0.3s ease !important;
-    }
-    
-    .stChatInputContainer button:hover {
-        background: linear-gradient(135deg, rgba(120, 119, 198, 0.35), rgba(120, 119, 198, 0.45)) !important;
-        border-color: rgba(120, 119, 198, 0.6) !important;
-        transform: scale(1.05) !important;
-    }
-    
-    /* ==================== SCROLLBAR - SLEEK & MODERN ==================== */
-    ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-    }
-    
-    ::-webkit-scrollbar-track {
-        background: rgba(0, 0, 0, 0.2);
-        border-radius: 10px;
-    }
-    
-    ::-webkit-scrollbar-thumb {
-        background: linear-gradient(180deg, rgba(120, 119, 198, 0.4), rgba(120, 119, 198, 0.6));
-        border-radius: 10px;
-        border: 2px solid transparent;
-        background-clip: padding-box;
-    }
-    
-    ::-webkit-scrollbar-thumb:hover {
-        background: linear-gradient(180deg, rgba(120, 119, 198, 0.6), rgba(120, 119, 198, 0.8));
-    }
-    
-    /* ==================== LINKS - ELEGANT UNDERLINE ==================== */
-    a {
-        color: rgba(168, 168, 255, 0.95) !important;
-        text-decoration: none !important;
-        border-bottom: 1px solid rgba(168, 168, 255, 0.3) !important;
-        transition: all 0.25s ease !important;
-        padding-bottom: 1px !important;
-    }
-    
-    a:hover {
-        color: rgba(200, 200, 255, 1) !important;
-        border-bottom-color: rgba(168, 168, 255, 0.8) !important;
-        text-shadow: 0 0 8px rgba(168, 168, 255, 0.3) !important;
-    }
-    
-    /* ==================== ANIMATIONS - SMOOTH & SOPHISTICATED ==================== */
-    @keyframes fadeIn {
-        from {
-            opacity: 0;
-            transform: translateY(12px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-    
-    @keyframes fadeInDown {
-        from {
-            opacity: 0;
-            transform: translateY(-20px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-    
-    @keyframes slideInRight {
-        from {
-            opacity: 0;
-            transform: translateX(30px) scale(0.95);
-        }
-        to {
-            opacity: 1;
-            transform: translateX(0) scale(1);
-        }
-    }
-    
-    @keyframes slideInLeft {
-        from {
-            opacity: 0;
-            transform: translateX(-30px) scale(0.95);
-        }
-        to {
-            opacity: 1;
-            transform: translateX(0) scale(1);
-        }
-    }
-    
-    @keyframes pulse {
-        0%, 100% {
-            opacity: 1;
-        }
-        50% {
-            opacity: 0.4;
-        }
-    }
-    
-    @keyframes typing {
-        0%, 100% {
-            opacity: 0.25;
-            transform: scale(0.9);
-        }
-        50% {
-            opacity: 1;
-            transform: scale(1.1);
-        }
-    }
-    
-    @keyframes shimmer {
-        0% {
-            background-position: -1000px 0;
-        }
-        100% {
-            background-position: 1000px 0;
-        }
-    }
-    
-    /* Message animations with stagger effect */
-    .stChatMessage {
-        animation: fadeIn 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    
-    [data-testid="user"] {
-        animation: slideInRight 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
-    }
-    
-    [data-testid="assistant"] {
-        animation: slideInLeft 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
-    }
-    
-    /* Typing indicator with elegant animation */
-    .typing-indicator {
-        animation: pulse 1.8s ease-in-out infinite;
-    }
-    
-    .typing-dot {
-        animation: typing 1.6s infinite ease-in-out;
-        display: inline-block;
-    }
-    
-    .typing-dot:nth-child(2) {
-        animation-delay: 0.2s;
-    }
-    
-    .typing-dot:nth-child(3) {
-        animation-delay: 0.4s;
-    }
-    
-    /* ==================== RESPONSIVE DESIGN - MOBILE OPTIMIZED ==================== */
-    @media (max-width: 768px) {
-        .block-container {
-            padding-top: 1.5rem !important;
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
-        }
-        
-        h1 {
-            font-size: 1.75rem !important;
-        }
-        
-        [data-testid="stCaptionContainer"] {
-            font-size: 0.925rem !important;
-        }
-        
-        [data-testid="user"] > div,
-        [data-testid="assistant"] > div {
-            max-width: 95% !important;
-            padding: 1rem 1.25rem !important;
-        }
-        
-        [data-testid="assistant"] > div {
-            padding: 1.5rem !important;
-        }
-    }
-    
-    /* ==================== WELCOME CARD STYLING ==================== */
-    .welcome-card {
-        background: linear-gradient(135deg, rgba(26, 26, 46, 0.6) 0%, rgba(15, 15, 30, 0.8) 100%) !important;
-        border: 1px solid rgba(120, 119, 198, 0.2) !important;
-        border-radius: 1.5rem !important;
-        padding: 2rem !important;
-        margin: 2rem 0 !important;
-        text-align: center !important;
-        backdrop-filter: blur(12px) !important;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2) !important;
-        animation: fadeIn 0.8s ease-out 0.4s both !important;
-    }
-    
-    .welcome-card:hover {
-        border-color: rgba(120, 119, 198, 0.35) !important;
-        box-shadow: 0 12px 48px rgba(120, 119, 198, 0.15) !important;
-        transform: translateY(-2px) !important;
-        transition: all 0.4s ease !important;
-    }
-</style>
-"""
-
 
 
 # ============================================================================
@@ -1414,12 +458,15 @@ def format_sources(answer: str) -> str:
             sources_text = line.split(":", 1)[1].strip()
             
             # CRITICAL FIX: Remove leading bullet if present (agent sometimes adds it incorrectly)
-            if sources_text.startswith("•"):
+            if sources_text.startswith("-") or sources_text.startswith("\u2022"):
                 sources_text = sources_text[1:].strip()
             
-            # Split by bullet (•) or comma
-            if " • " in sources_text:
-                parts = [p.strip() for p in sources_text.split(" • ") if p.strip()]
+            # Split by bullet placeholders or comma
+            bullet_separator = " - "
+            if "\u2022" in sources_text:
+                bullet_separator = " \u2022 "
+            if bullet_separator.strip() and bullet_separator in sources_text:
+                parts = [p.strip() for p in sources_text.split(bullet_separator) if p.strip()]
             else:
                 parts = [p.strip() for p in sources_text.split(",") if p.strip()]
             
@@ -1565,10 +612,10 @@ def render_message(role: str, content: str, message_id: int | None = None) -> No
                 <span class="feedback-label">Was this helpful?</span>
 
                 <input type="radio" name="fb-{message_id}" id="fb-{message_id}-up" class="fb-radio" />
-                <label for="fb-{message_id}-up" class="feedback-btn thumbs-up" title="Helpful">👍</label>
+                <label for="fb-{message_id}-up" class="feedback-btn thumbs-up" title="Helpful">&#10003;</label>
 
                 <input type="radio" name="fb-{message_id}" id="fb-{message_id}-down" class="fb-radio" />
-                <label for="fb-{message_id}-down" class="feedback-btn thumbs-down" title="Not helpful">👎</label>
+                <label for="fb-{message_id}-down" class="feedback-btn thumbs-down" title="Not helpful">&#10005;</label>
             </div>
         """)
     else:
@@ -1685,10 +732,15 @@ def query_bot(bot: HrBot, question: str, history_context: str, augmented_questio
 
 def _rerun() -> None:
     """Trigger rerun."""
-    if hasattr(st, "rerun"):
-        st.rerun()
-    else:
-        st.experimental_rerun()
+    rerun_fn = getattr(st, "rerun", None)
+    exp_rerun_fn = getattr(st, "experimental_rerun", None)
+    try:
+        if callable(rerun_fn):
+            rerun_fn()
+        elif callable(exp_rerun_fn):
+            exp_rerun_fn()
+    except Exception:
+        pass
 
 
 def render_typing_indicator() -> None:
@@ -1720,10 +772,51 @@ def main() -> None:
         initial_sidebar_state="collapsed",
     )
 
-    st.markdown(MINIMAL_CSS, unsafe_allow_html=True)
+    _inject_theme_css()
 
-    if not ensure_authenticated():
+    auth_ctx = _resolve_auth_context()
+    if auth_ctx.status == "unauthenticated":
+        _set_page_mode("auth")
+        render_login_screen()
         return
+    if auth_ctx.status == "loading":
+        _set_page_mode("auth")
+        render_auth_loading()
+        return
+    if auth_ctx.status == "denied":
+        _set_page_mode("auth")
+        render_access_denied(auth_ctx.email)
+        return
+
+    _set_page_mode("app")
+
+    user_email = auth_ctx.email or "unknown"
+    user_role = auth_ctx.role or "employee"
+    user_obj = getattr(st, "user", None)
+    user_name = (
+        getattr(user_obj, "name", None)
+        or (user_email.split("@")[0] if "@" in user_email else user_email)
+    )
+
+    if os.getenv("DEBUG_AUTH", "false").lower() in ("1", "true", "yes"):
+        st.sidebar.markdown("### Debug: Streamlit user")
+        try:
+            st.sidebar.json(dict(st.user))  # type: ignore[arg-type]
+        except Exception:
+            st.sidebar.write(getattr(st, "user", None))
+
+    render_dashboard_header(user_name, user_role)
+    st.caption(
+        "Your intelligent HR companion for policies, benefits, and workplace guidance -- available 24/7"
+    )
+    if st.button("Sign out", key="logout_btn"):
+        for key in ["dev_email", "logged_in_email", "_pkce_verifier", "_oauth_state", "_auth_pending"]:
+            st.session_state.pop(key, None)
+        try:
+            st.logout()
+        except Exception:
+            _clear_query_params()
+        _rerun()
 
     # Inject simple, reliable feedback interaction
     st.markdown(
@@ -1754,95 +847,15 @@ def main() -> None:
 
                 const messageId = button.getAttribute('data-message-id');
                 const sentiment = button.getAttribute('data-feedback');
-                console.log(`✅ Feedback recorded: message ${messageId} = ${sentiment}`);
+                console.log(`Feedback recorded: message ${messageId} = ${sentiment}`);
             });
             
-            console.log('🎨 Feedback system ready');
+            console.log('Feedback system ready');
         })();
         </script>
         """,
         unsafe_allow_html=True,
     )
-
-    # Get user information from Streamlit's built-in auth
-    # Support developer fallback (local testing) via `st.session_state['dev_email']`
-    if st.session_state.get("dev_email"):
-        user_email = st.session_state.get("dev_email").lower()
-        user_name = user_email.split("@")[0]
-        user_role = _derive_role(user_email)
-        st.sidebar.markdown("**Note:** Running in developer fallback auth mode")
-    else:
-        user_email = getattr(st.user, 'email', getattr(st.user, 'sub', 'unknown'))
-        user_email = str(user_email).lower() if user_email else 'unknown'
-        user_role = _derive_role(user_email)
-        user_name = getattr(st.user, 'name', user_email.split('@')[0] if '@' in user_email else user_email)
-    
-    # Professional header with enhanced styling, user info, and logout
-    st.markdown(f"""
-    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;">
-        <div style="display: flex; align-items: center; gap: 1rem;">
-            <div style="
-                width: 56px; 
-                height: 56px; 
-                background: linear-gradient(135deg, #7877c6 0%, #9b8fd9 100%);
-                border-radius: 14px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                box-shadow: 0 4px 12px rgba(120, 119, 198, 0.3);
-            ">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M20 6H12L10 4H4C2.9 4 2 4.9 2 6V18C2 19.1 2.9 20 4 20H20C21.1 20 22 19.1 22 18V8C22 6.9 21.1 6 20 6Z" fill="white" opacity="0.9"/>
-                    <path d="M12 9C10.34 9 9 10.34 9 12C9 13.66 10.34 15 12 15C13.66 15 15 13.66 15 12C15 10.34 13.66 9 12 9Z" fill="white"/>
-                </svg>
-            </div>
-            <div>
-                <h1 style="margin: 0 !important; padding: 0 !important;">Inara</h1>
-            </div>
-        </div>
-        <div style="text-align: right;">
-            <div style="font-size: 0.875rem; color: rgba(255, 255, 255, 0.9); font-weight: 500;">
-                {user_name}
-            </div>
-            <div style="font-size: 0.75rem; color: rgba(255, 255, 255, 0.6);">
-                {user_role.title()} Access
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    st.caption("Your intelligent HR companion for policies, benefits, and workplace guidance — available 24/7")
-    col_logout = st.container()
-    with col_logout:
-        if st.button('Sign out', key='logout_btn'):
-            # Clear session state and use Streamlit's built-in logout when available
-            for k in ['dev_email', 'logged_in_email', '_pkce_verifier', '_oauth_state']:
-                if k in st.session_state:
-                    del st.session_state[k]
-                try:
-                    st.logout()
-                except Exception:
-                    # If st.logout is not available locally, just clear query params and rerun
-                    _clear_query_params()
-            _rerun()
-    
-    # Enhanced welcome message for first-time users
-    if len(st.session_state.get("history", [])) == 0:
-        st.markdown("""
-        <div class="welcome-card">
-            <div style="font-size: 2.5rem; margin-bottom: 1rem;">👋</div>
-            <div style="font-size: 1.2rem; color: #ffffff; font-weight: 600; margin-bottom: 1rem;">
-                Welcome! How can I assist you today?
-            </div>
-            <div style="font-size: 0.975rem; color: #b8b8b8; line-height: 1.7; max-width: 600px; margin: 0 auto;">
-                I'm here to help with company policies, leave requests, benefits, procedures, and more.<br/>
-                <span style="margin-top: 1rem; display: inline-block;">
-                    Try asking: <span style="color: #d8d8d8; font-weight: 500;">"What is the sick leave policy?"</span><br/>
-                    or <span style="color: #d8d8d8; font-weight: 500;">"How do I request vacation time?"</span>
-                </span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
     # Initialize session state
     if "history" not in st.session_state:
         st.session_state["history"] = []
@@ -1856,20 +869,24 @@ def main() -> None:
         st.session_state["s3_refresh_msg"] = None
 
     # Load resources with role-based access
-    current_email = _get_current_email() or 'unknown'
-    user_role = _derive_role(current_email)
-
-    # Debug: Show loading status
-    with st.spinner(f"🔐 Initializing {user_role.title()} HR Assistant..."):
+    with st.spinner(f"Initializing {user_role.title()} HR Assistant..."):
         try:
             bot = load_bot(user_role=user_role)
-            st.success(f"✅ {user_role.title()} HR Assistant loaded successfully!")
+            st.success(f"{user_role.title()} HR Assistant loaded successfully.")
         except Exception as e:
-            st.error(f"❌ Failed to load HR Assistant: {e}")
+            st.error(f"Failed to load HR Assistant: {e}")
             st.error("Please try refreshing the page or contact support.")
             st.stop()
 
     executor = get_executor()
+
+    def submit_question(prompt: str) -> None:
+        history_context = build_history_context(st.session_state["history"], prompt)
+        augmented_question = build_augmented_question(st.session_state["history"], prompt)
+        st.session_state["history"].append({"role": "user", "content": prompt})
+        future = executor.submit(query_bot, bot, prompt, history_context, augmented_question)
+        st.session_state["pending_response"] = {"future": future, "start_time": time.time()}
+        _rerun()
     
     # ============================================================================
     # ACTION BUTTONS - Professional side-by-side layout
@@ -1884,7 +901,7 @@ def main() -> None:
         # S3 Refresh Button (Blue - Left)
         with col1:
             st.markdown('<div class="s3-refresh-container">', unsafe_allow_html=True)
-            if st.button("🔄 Refresh S3 Docs", key="s3_refresh_btn", help="Download the latest HR policy documents from S3. Use this when new policies are uploaded.", use_container_width=True):
+            if st.button("Refresh S3 Docs", key="s3_refresh_btn", help="Download the latest HR policy documents from S3. Use this when new policies are uploaded.", use_container_width=True):
                 try:
                     from hr_bot.utils.s3_loader import S3DocumentLoader
                     from hr_bot.crew import HrBot
@@ -1900,36 +917,36 @@ def main() -> None:
                     rag_index_dir = Path(".rag_index")
                     if rag_index_dir.exists():
                         shutil.rmtree(rag_index_dir)
-                        print(f"🗑️  Deleted .rag_index directory")
+                        print("Deleted .rag_index directory")
                     
                     # CRITICAL FIX #2: Clear in-memory RAG tool cache
                     HrBot.clear_rag_cache()
                     
                     # CRITICAL FIX #3: Clear Streamlit resource cache (bot instance)
                     load_bot.clear()
-                    print(f"🗑️  Cleared Streamlit resource cache")
+                    print("Cleared Streamlit resource cache")
                     
                     # Clear session state bot instance
                     if 'bot_instance' in st.session_state:
                         del st.session_state['bot_instance']
                     
-                    st.session_state["s3_refresh_msg"] = f"✅ Refreshed {len(document_paths)} HR documents from S3 and rebuilt RAG indexes!"
+                    st.session_state["s3_refresh_msg"] = f"Refreshed {len(document_paths)} HR documents from S3 and rebuilt RAG indexes."
                     _rerun()
                 except Exception as e:
-                    st.session_state["s3_refresh_msg"] = f"❌ Error refreshing S3 documents: {e}"
+                    st.session_state["s3_refresh_msg"] = f"Error refreshing S3 documents: {e}"
                     _rerun()
             st.markdown('</div>', unsafe_allow_html=True)
         
         # Clear Cache Button (Red - Right)
         with col2:
             st.markdown('<div class="clear-cache-container">', unsafe_allow_html=True)
-            if st.button("🗑️ Clear Response Cache", key="clear_cache_btn", help="Clear cached responses. Use this if you get a technical error and want to retry your query.", use_container_width=True):
+            if st.button("Clear Response Cache", key="clear_cache_btn", help="Clear cached responses. Use this if you get a technical error and want to retry your query.", use_container_width=True):
                 try:
                     bot.response_cache.clear_all()
-                    st.session_state["cache_cleared_msg"] = "✅ Response cache cleared successfully! You can now retry your query."
+                    st.session_state["cache_cleared_msg"] = "Response cache cleared successfully. You can now retry your query."
                     _rerun()
                 except Exception as e:
-                    st.session_state["cache_cleared_msg"] = f"❌ Error clearing cache: {e}"
+                    st.session_state["cache_cleared_msg"] = f"Error clearing cache: {e}"
                     _rerun()
             st.markdown('</div>', unsafe_allow_html=True)
         
@@ -1960,14 +977,13 @@ def main() -> None:
             try:
                 answer = future.result()
                 formatted = format_answer(answer)
-                st.session_state.history.append({"role": "assistant", "content": formatted})
-                del st.session_state.pending_response
+                st.session_state["history"].append({"role": "assistant", "content": formatted})
+                del st.session_state["pending_response"]
                 _rerun()
             except Exception as e:
-                # Show error with cache clear suggestion
-                st.error(f"⚠️ Technical Error: {e}")
-                st.warning("💡 **Tip:** This error response has been cached. To retry your query successfully, please click the '🗑️ Clear Cache' button in the top right corner, then ask your question again.")
-                del st.session_state.pending_response
+                st.error(f"Technical error: {e}")
+                st.warning("This response was cached. Clear the response cache before retrying the same question.")
+                del st.session_state["pending_response"]
                 _rerun()
         else:
             # Show professional animated thinking indicator while processing
@@ -2011,16 +1027,9 @@ def main() -> None:
             time.sleep(1)
             _rerun()
 
-    # Chat input - DON'T render immediately, just add to history
+    # Chat input - add to history and process asynchronously
     if prompt := st.chat_input(DEFAULT_PLACEHOLDER):
-        history_context = build_history_context(st.session_state["history"], prompt)
-        augmented_question = build_augmented_question(st.session_state["history"], prompt)
-        # Add to history (will be rendered on next rerun)
-        st.session_state["history"].append({"role": "user", "content": prompt})
-        # Start processing
-        future = executor.submit(query_bot, bot, prompt, history_context, augmented_question)
-        st.session_state["pending_response"] = {"future": future, "start_time": time.time()}
-        _rerun()
+        submit_question(prompt)
 
 
 if __name__ == "__main__":

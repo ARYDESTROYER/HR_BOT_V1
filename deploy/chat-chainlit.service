@@ -1,0 +1,16 @@
+[Unit]
+Description=Inara HR Assistant (Chainlit)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=HR_BOT_V1
+EnvironmentFile=HR_BOT_V1/.env
+Environment="CHAINLIT_ENV_FILE=.env"
+ExecStart=HR_BOT_V1/.venv/bin/chainlit run src/hr_bot/ui/chainlit_app.py --host 0.0.0.0 --port 8501
+Restart=on-failure
+User=chat
+Group=chat
+
+[Install]
+WantedBy=multi-user.target

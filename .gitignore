@@ -56,3 +56,5 @@ frontend/package-lock.json
 frontend/dist/
 frontend/.cache/
 node_modules/
+.streamlit/secrets.toml
+storage/response_cache/

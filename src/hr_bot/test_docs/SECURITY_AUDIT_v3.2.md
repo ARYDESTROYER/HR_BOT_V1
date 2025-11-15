@@ -24,7 +24,7 @@ with sqlite3.connect(self._memory_db_path) as conn:
     cursor.execute(...)
     rows = cursor.fetchall()
 
-# Line 925 - WRITE operation  
+# Line 925 - WRITE operation
 with sqlite3.connect(self._memory_db_path) as conn:
     cursor = conn.cursor()
     cursor.execute("SELECT 1 FROM ...")  # Check for duplicate
@@ -93,12 +93,12 @@ def _load_recent_memories(self, query: str, limit: int = 5):
 ```python
 def set(self, query: str, response: str, context: str = ""):
     cache_key = self._get_cache_key(query, context)
-    
+
     if self._is_tool_artifact(response):
         logger.debug(f"⏭️  Skipping cache...")
         self._remove_cache_entry(cache_key)
         return
-    
+
     # BUG: What if response is empty string "" or whitespace "   "?
     # It will be cached, and future queries return empty answer!
     cached_data = {"response": response, "timestamp": timestamp}
@@ -121,23 +121,23 @@ def set(self, query: str, response: str, context: str = ""):
 ```python
 def set(self, query: str, response: str, context: str = ""):
     cache_key = self._get_cache_key(query, context)
-    
+
     # CRITICAL: Validate response before caching
     if not response or not response.strip():
         logger.warning(f"⚠️ Empty response not cached for query: {query[:50]}")
         # Remove any existing cache to prevent stale data
         self._remove_cache_entry(cache_key)
         return
-    
+
     if len(response.strip()) < 20:  # Suspiciously short
         logger.warning(f"⚠️ Suspiciously short response ({len(response)} chars), not caching")
         return
-    
+
     if self._is_tool_artifact(response):
         logger.debug(f"⏭️  Skipping cache for tool-only transcript")
         self._remove_cache_entry(cache_key)
         return
-    
+
     # Rest of caching logic...
 ```
 
@@ -156,7 +156,7 @@ def set(self, query: str, response: str, context: str = ""):
 try:
     with open(cache_file, 'r', encoding='utf-8') as f:
         cached = json.load(f)  # Can fail if JSON is corrupted
-    
+
     timestamp = datetime.fromisoformat(cached["timestamp"])  # Can fail if key missing
     # No except block - exception bubbles up and crashes request
 ```
@@ -175,14 +175,14 @@ def get(self, query: str, context: str = "") -> Optional[str]:
         try:
             with open(cache_file, 'r', encoding='utf-8') as f:
                 cached = json.load(f)
-            
+
             # Validate required fields
             if "response" not in cached or "timestamp" not in cached:
                 raise ValueError("Missing required fields")
-            
+
             timestamp = datetime.fromisoformat(cached["timestamp"])
             # ... rest of logic
-            
+
         except (json.JSONDecodeError, ValueError, KeyError) as e:
             logger.error(f"Corrupted cache file {cache_key}: {e}")
             # Delete corrupted cache and continue
@@ -207,13 +207,13 @@ def get(self, query: str, context: str = "") -> Optional[str]:
 def _build_query_index(self):
     """Build index of all cached queries for fast similarity search"""
     self.query_index = []
-    
+
     for cache_file in self.cache_dir.glob("*.json"):
         # BUG: No limit on number of files loaded into memory
         # If 10,000 queries cached, loads 10,000 files into RAM
         with open(cache_file, 'r', encoding='utf-8') as f:
             cached = json.load(f)
-        
+
         query = cached.get("query_preview", "")
         keywords = self._extract_keywords(query)
         self.query_index.append((cache_key, query, keywords))
@@ -233,27 +233,27 @@ def _build_query_index(self):
 def __init__(self, ...):
     # ... existing code ...
     self.max_index_entries = int(os.getenv("CACHE_MAX_INDEX_ENTRIES", "5000"))
-    
+
     # Build index (will be limited)
     self._build_query_index()
 
 def _build_query_index(self):
     """Build index with size limit to prevent memory exhaustion"""
     self.query_index = []
-    
+
     # Get all cache files sorted by modification time (newest first)
     cache_files = sorted(
         [f for f in self.cache_dir.glob("*.json") if f.name != "cache_stats.json"],
         key=lambda f: f.stat().st_mtime,
         reverse=True
     )
-    
+
     # Limit to most recent entries
     for cache_file in cache_files[:self.max_index_entries]:
         try:
             with open(cache_file, 'r', encoding='utf-8') as f:
                 cached = json.load(f)
-            
+
             query = cached.get("query_preview", "")
             if query:
                 cache_key = cache_file.stem
@@ -261,7 +261,7 @@ def _build_query_index(self):
                 self.query_index.append((cache_key, query, keywords))
         except Exception as e:
             logger.error(f"Error indexing cache file {cache_file}: {e}")
-    
+
     logger.info(f"📇 Built query index: {len(self.query_index)} entries (max: {self.max_index_entries})")
 ```
 
@@ -277,12 +277,12 @@ def _build_query_index(self):
 ```python
 def query_with_cache(self, query: str, context: str = "") -> str:
     # ... cache checks ...
-    
+
     # Cache miss - execute crew with full memory
     print("🔄 CACHE MISS - Executing crew...")
     inputs = {"query": query, "context": context}
     result = self.crew().kickoff(inputs=inputs)  # <-- NO ERROR HANDLING
-    
+
     # If AWS Bedrock throttles (TooManyRequestsException), this crashes
     response_text = str(result.raw)
     return response_text
@@ -302,26 +302,26 @@ from botocore.exceptions import ClientError
 
 def query_with_cache(self, query: str, context: str = "", max_retries: int = 3) -> str:
     """Query with automatic retry on rate limits"""
-    
+
     # ... cache checks ...
-    
+
     # Cache miss - execute crew with retry logic
     print("🔄 CACHE MISS - Executing crew...")
     inputs = {"query": query, "context": context}
-    
+
     for attempt in range(max_retries):
         try:
             result = self.crew().kickoff(inputs=inputs)
             response_text = str(result.raw) if hasattr(result, 'raw') else str(result)
             formatted_response = remove_document_evidence_section(response_text)
-            
+
             # Save to cache
             self.response_cache.set(query, formatted_response, context)
             return formatted_response
-            
+
         except ClientError as e:
             error_code = e.response.get('Error', {}).get('Code', '')
-            
+
             if error_code in ['ThrottlingException', 'TooManyRequestsException']:
                 if attempt < max_retries - 1:
                     wait_time = (2 ** attempt) * 1  # Exponential backoff: 1s, 2s, 4s
@@ -341,14 +341,14 @@ def query_with_cache(self, query: str, context: str = "", max_retries: int = 3) 
                     "I apologize, but I encountered a technical issue. "
                     "Please try again or contact your HR department directly."
                 )
-        
+
         except Exception as e:
             logger.error(f"Unexpected error in query processing: {e}")
             return (
                 "I apologize, but I encountered an unexpected error. "
                 "Please try again or contact your HR department directly."
             )
-    
+
     # Should never reach here
     return "Please try your query again."
 ```
@@ -393,12 +393,12 @@ def add_to_history(role: str, content: str):
     """Thread-safe history update"""
     if "history" not in st.session_state:
         st.session_state["history"] = []
-    
+
     # Check for duplicates before adding
     history = st.session_state["history"]
     if history and history[-1].get("content") == content:
         return  # Skip duplicate
-    
+
     st.session_state["history"].append({
         "role": role,
         "content": content,
@@ -418,7 +418,7 @@ def add_to_history(role: str, content: str):
 ```python
 def get(self, query: str, context: str = "") -> Optional[str]:
     # ... checks ...
-    
+
     # PHASE 3: Semantic similarity search
     for cached_key, cached_query, cached_keywords in self.query_index:
         similarity = self._calculate_similarity(query_keywords, cached_keywords)
@@ -437,29 +437,29 @@ def get(self, query: str, context: str = "") -> Optional[str]:
 ```python
 def get(self, query: str, context: str = "") -> Optional[str]:
     # ... existing code ...
-    
+
     # PHASE 3: Semantic similarity search with timeout protection
     logger.info(f"🔍 Searching {len(self.query_index)} cached queries...")
-    
+
     best_match_key = None
     best_similarity = 0.0
     best_query = ""
-    
+
     # Limit search to first N entries if index is huge
     max_search_entries = min(len(self.query_index), 10000)
-    
+
     for cached_key, cached_query, cached_keywords in self.query_index[:max_search_entries]:
         similarity = self._calculate_similarity(query_keywords, cached_keywords)
         if similarity > best_similarity:
             best_similarity = similarity
             best_match_key = cached_key
             best_query = cached_query
-        
+
         # Early exit if perfect match found
         if similarity >= 0.99:
             logger.info(f"🎯 Perfect match found, stopping search early")
             break
-    
+
     # Rest of logic...
 ```
 

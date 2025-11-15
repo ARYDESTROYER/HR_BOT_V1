@@ -409,7 +409,11 @@ class MasterActionsDatabase:
                 ],
                 keywords=[
                     "flexi bills", "submit bills", "flexi basket bills", "claims",
-                    "manage claims", "bill submission", "reimbursement"
+                    "manage claims", "bill submission", "reimbursement",
+                    "expense claim", "claim expenses", "travel claim", "lunch claim",
+                    "meal claim", "client lunch", "client meal", "expense reimbursement",
+                    "travel expenses", "claim travel", "expense", "expenses",
+                    "claim reimbursement", "submit claim", "submit expense"
                 ],
                 source="Master Actions Fallback"
             ),

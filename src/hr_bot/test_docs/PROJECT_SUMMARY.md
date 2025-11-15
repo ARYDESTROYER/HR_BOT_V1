@@ -302,7 +302,7 @@ class HrBot(CrewBase):
     def __init__(self):
         super().__init__()
         self.custom_tool = CustomTool()
-    
+
     @agent
     def hr_assistant(self) -> Agent:
         return Agent(
@@ -319,7 +319,7 @@ from langchain_community.document_loaders import PyPDFLoader
 def _load_documents(self):
     # Existing .docx loading
     ...
-    
+
     # Add PDF support
     for file in self.data_dir.glob("*.pdf"):
         loader = PyPDFLoader(str(file))

@@ -1,11 +1,158 @@
-# 🤖 HR Bot v5.0 - Enterprise-Grade AI HR Assistant with S3 Intelligence
+# 🤖 HR Bot v6.0 - Enterprise-Grade AI HR Assistant with S3 Intelligence
 ## 🏆 **Production-Ready | Role-Based Access | Smart S3 Caching**
 
-A next-generation HR assistant powered by **CrewAI** and **Amazon Bedrock Nova Lite**, featuring **Role-Based Document Access**, **ETag-Based S3 Smart Caching**, and **Hybrid RAG** with professional Streamlit UI.
+A next-generation HR assistant powered by **CrewAI** and **Amazon Bedrock Nova Lite**, featuring **Role-Based Document Access**, **ETag-Based S3 Smart Caching**, and **Hybrid RAG** with a Chainlit production UI.
+
+## 🆕 Chainlit Front-End (v6.0)
+
+The Streamlit experience is now fully migrated to **Chainlit** for a lighter, more production-ready chat surface:
+
+- 🔐 **Google / Azure AD OAuth** through Chainlit's native providers with the same RBAC checks (`EXECUTIVE_EMAILS`, `EMPLOYEE_EMAILS`).
+- 🪪 **Header-based dev login** (guarded by `ALLOW_DEV_LOGIN`) for local and automated testing.
+- 🔄 **Refresh S3 Docs** and 🧹 **Clear Response Cache** actions reproduced as Chainlit buttons with identical logic.
+- 🔥 **Warm start caching** reuses the existing HrBot infrastructure; only the UI shell changed.
+- 📝 **Documentation-first deployment**: deployment and runtime guidance is included below (merged into this README) along with `.chainlit/config.toml` and `chainlit.md` for quick onboarding.
+## Chainlit Deployment Guide
+
+This section captures everything needed to run the Chainlit UI in production with the same behavior, access controls, and maintenance affordances that previously lived inside `src/hr_bot/ui/app.py`.
+
+### 1. Runtime Command
+
+
+Run Chainlit from the project root (`HR_BOT_V1`) so it picks up `.env`, `.chainlit/config.toml`, and the `src/hr_bot/ui/chainlit_app.py` entrypoint:
+
+```bash
+# From the repository root (example path shown relative to repo)
+cd HR_BOT_V1
+# If you want to activate the project venv manually (uv manages .venv by default):
+. .venv/bin/activate
+chainlit run src/hr_bot/ui/chainlit_app.py --host 0.0.0.0 --port 8501 --watch
+```
+
+- `--port 8501` keeps the public endpoint identical to the previous Streamlit service.
+- `--watch` reloads the app automatically while iterating locally; drop it for production.
+
+### 2. Environment Variables
+
+Set these variables (usually via the repository `.env` file or your deployment environment):
+
+| Variable | Purpose |
+| --- | --- |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` | Bedrock + S3 access |
+| `BEDROCK_MODEL`, `BEDROCK_EMBED_MODEL`, `BEDROCK_EMBED_REGION` | LLM + embeddings |
+| `S3_BUCKET_NAME`, `S3_BUCKET_REGION`, `S3_EXECUTIVE_PREFIX`, `S3_EMPLOYEE_PREFIX` | Document loading |
+| `EXECUTIVE_EMAILS`, `EMPLOYEE_EMAILS` | RBAC allow-lists |
+| `SUPPORT_CONTACT_EMAIL` | Contact link rendered in the header |
+| `ALLOW_DEV_LOGIN`, `DEV_TEST_EMAIL` | Optional header-based dev login |
+| `OAUTH_GOOGLE_CLIENT_ID`, `OAUTH_GOOGLE_CLIENT_SECRET` | Google SSO credentials |
+| `CHAINLIT_OAUTH_CALLBACK_URL` | Should match the OAuth redirect (`http://<host>:<port>/oauth/callback`) |
+| `CHAINLIT_BASE_URL` | External base URL (e.g. `https://chat.testingurl.cloud`) used in auth links |
+| `CHAINLIT_AUTH_SECRET` | JWT signing secret (`chainlit create-secret` generates one) |
+| `CHAINLIT_MAX_WORKERS` | Size of the background executor for blocking CrewAI calls (defaults to 4) |
+
+> **Note:** The app will copy `GOOGLE_CLIENT_ID` → `OAUTH_GOOGLE_CLIENT_ID` (and the secret) if present for backward compatibility. For clarity, prefer setting the `CHAINLIT_` prefixed variables directly in production.
+
+### 3. Authentication Flow
+
+1. Users land on the Chainlit login screen and select “Continue with Google”.
+2. Chainlit’s OAuth flow validates the ID token using the provided client ID/secret.
+3. `src/hr_bot/ui/chainlit_app.py` runs `_derive_role(email)` to assign Executive vs Employee access. Any email not in `EXECUTIVE_EMAILS`/`EMPLOYEE_EMAILS` is rejected.
+4. Approved users get a personalized welcome card plus chat access.
+
+#### Dev / Header-Based Login
+
+When `ALLOW_DEV_LOGIN=true`, Chainlit also accepts headers such as `X-Forwarded-Email`, `X-Dev-Email`, or `X-User-Email`. This is useful behind an internal proxy or when running automated tests. Disable the flag in production.
+
+### 4. Admin Actions
+
+Two admin affordances appear on every session:
+
+| Action | What it does |
+| --- | --- |
+| **Refresh S3 Docs** | Clears the local S3 cache, forces a document re-download, deletes FAISS/BM25 indexes (`.rag_index`), clears the HrBot RAG cache, and resets in-memory bot instances. Mirrors the Streamlit button 1:1. |
+| **Clear Response Cache** | Calls `HrBot.response_cache.clear_all()` so cached answers can be re-generated. |
+
+Both run asynchronously and send success/failure messages inside the chat transcript.
+
+### 5. Systemd Service Example
+
+
+Use the checked-in service file at `deploy/chat-chainlit.service` as an example (adjust paths and user as appropriate). In documentation we use repository-relative placeholders rather than server-specific absolute paths:
+
+```ini
+[Unit]
+Description=Inara HR Assistant (Chainlit)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=HR_BOT_V1
+EnvironmentFile=HR_BOT_V1/.env
+ExecStart=HR_BOT_V1/.venv/bin/chainlit run src/hr_bot/ui/chainlit_app.py --host 0.0.0.0 --port 8501
+Restart=on-failure
+User=chat
+Group=chat
+
+[Install]
+WantedBy=multi-user.target
+```
+
+
+Reload systemd and enable the service (update paths to your server layout before running):
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now chat-chainlit.service
+```
+
+### 6. Logging & Observability
+
+- Chainlit logs through the standard Python `logging` module. Set `LOG_LEVEL=INFO` (or `DEBUG`) to change verbosity.
+- CrewAI / HrBot logs continue to stream to stdout; `journalctl -u chat-chainlit.service` will capture everything.
+- Admin actions (refresh/cache) include structured success/error messages in the chat history to aid support teams.
+
+### 7. Rollback Plan
+
+If anything misbehaves, stop the Chainlit service and start the original Streamlit one:
+
+```bash
+sudo systemctl stop chat-chainlit.service
+sudo systemctl start chat-streamlit.service
+```
+
+The migration only adds new files and documentation—`src/hr_bot/ui/app.py` remains untouched, so rollback is instant.
+
+
+### Local setup (quick)
+
+Run these commands from your workstation. `uv sync` will create and manage a project-local virtual environment at `.venv` by default — you do not need to create one manually.
+
+```bash
+# 1) Change to the repository root
+cd /path/to/HR_BOT_V1
+
+# 2) Create and populate the project venv and install dependencies
+uv sync
+
+# 3) Install CrewAI CLI/tooling helpers
+crewai install
+
+# 4) Run the development UI (or replace with chainlit/production start)
+crewai run
+```
+
+Notes:
+- `uv sync` creates `.venv/` and installs pinned dependencies listed in `pyproject.toml`.
+- Use `uv sync --extra legacy` to also install the optional Streamlit UI (rollback only).
+- Do not remove or alter the primary `.env` file unless intentionally reconfiguring runtime secrets.
+
+> 🚨 **Legacy Streamlit UI**: `src/hr_bot/ui/app.py` remains in the repo for rollback but Chainlit is now the supported surface. Use `chainlit run src/hr_bot/ui/chainlit_app.py --host 0.0.0.0 --port 8501` (see the **Chainlit Deployment Guide** section above in this README).
+>
+> **LEGACY - Streamlit (rollback only):** The Streamlit UI is preserved for emergency rollback scenarios and is intentionally not required by the default installation. Prefer Chainlit for active development and production deployments.
 
 ---
 
-## 🚀 **What's New in v5.0?**
+## 🚀 **What's New in v6.0?**
 
 ### 🔐 **Role-Based S3 Document Access** (NEW!)
 Enterprise-grade document security with role-based access control:
@@ -26,7 +173,7 @@ Production-grade caching that saves 93% in S3 costs:
 - **Smart Refresh**: Manual refresh button in UI for immediate updates
 - **Three-Layer Cache**: Manifest + Version Hash + Metadata tracking
 
-### 🎨 **Professional Streamlit UI** (Enhanced)
+### 🎨 **Professional Chainlit UI** (Enhanced)
 Modern, production-ready web interface:
 
 - **Two-Button Layout**: Side-by-side action buttons for clean UX
@@ -146,7 +293,7 @@ Advanced retrieval optimized for cost and performance:
 - Accuracy: 95%+ for policy questions
 - Cost: $0 (no external API calls)
 
-### 🎨 **Professional Streamlit UI**
+### 🎨 **Professional Chainlit UI**
 Modern, enterprise-ready web interface:
 
 **Features**:
@@ -186,7 +333,7 @@ Direct procedural guidance with clickable links:
 - **Score Validation**: Confidence threshold (-2.0) prevents irrelevant results
 - **Table-Aware Processing**: Preserves structure in policy documents
 
-### 🎨 **Professional Streamlit Web UI**
+### 🎨 **Professional Chainlit Web UI**
 - **Premium Dark Theme**: Beautiful gradient backgrounds with elegant design
 - **Real-time Status**: See agent thinking (Analyzing → Searching → Preparing)
 - **Conversation Memory**: Full chat history with context awareness
@@ -275,7 +422,7 @@ Direct procedural guidance with clickable links:
 
 ## 🎯 Features
 
-### 🎨 Professional Streamlit Web UI
+### 🎨 Professional Chainlit Web UI
 - **Premium Dark Theme**: Beautiful gradient backgrounds with purple accents
 - **Elegant Animations**: Smooth loading indicators and transitions
 - **Real-time Status**: See exactly what the agent is doing (Analyzing → Searching → Preparing)
@@ -431,11 +578,11 @@ uv run python -c "import crewai; print(f'CrewAI version: {crewai.__version__}')"
 
 ### 🎨 Web UI (Recommended)
 
-Launch the beautiful Streamlit web interface:
+Launch the Chainlit web interface (new default):
 
 ```bash
 # Run with UV (recommended - no activation needed)
-uv run python -m streamlit run src/hr_bot/ui/app.py
+uv run chainlit run src/hr_bot/ui/chainlit_app.py --host 0.0.0.0 --port 8501
 ```
 
 **Alternative methods:**
@@ -447,11 +594,17 @@ source .venv/bin/activate  # macOS/Linux
 # OR
 .venv\Scripts\activate     # Windows
 
-# Run Streamlit
-streamlit run src/hr_bot/ui/app.py
+# Run Chainlit
+chainlit run src/hr_bot/ui/chainlit_app.py --host 0.0.0.0 --port 8501
 ```
 
-The app will open automatically in your browser at **http://localhost:8501**
+The app will open automatically in your browser at **http://localhost:8501** (same URL/port as the legacy Streamlit build).
+
+LEGACY - Streamlit (rollback only):
+```bash
+# Rollback to legacy Streamlit (only for emergency use):
+uv run python -m streamlit run src/hr_bot/ui/app.py
+```
 
 **Features:**
 - 💬 Interactive chat interface
@@ -463,9 +616,9 @@ The app will open automatically in your browser at **http://localhost:8501**
 - 🎨 Professional dark theme
 - 📈 Progress indicators
 
-**Pro tip:** For production deployment, use:
+**Pro tip:** For production deployment, use the systemd unit at `deploy/chat-chainlit.service` (see the **Chainlit Deployment Guide** section in this README) or run:
 ```bash
-uv run python -m streamlit run src/hr_bot/ui/app.py --server.port=8501 --server.address=0.0.0.0 --server.headless=true
+uv run chainlit run src/hr_bot/ui/chainlit_app.py --host 0.0.0.0 --port 8501 --no-cache
 ```
 
 ---
@@ -508,7 +661,7 @@ while True:
     query = input("> ")
     if query.lower() in ['exit', 'quit', 'q']:
         break
-    
+
     result = crew.kickoff(inputs={'query': query, 'context': ''})
     print(f"\n{result.raw}\n")
 
@@ -616,7 +769,7 @@ CACHE_TTL_HOURS=72  # Default: 72 hours (3 days)
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                     HR Bot v5.0 Architecture                              │
+│                     HR Bot v6.0 Architecture                              │
 │                  Role-Based S3 + ETag Smart Caching                       │
 └──────────────────────────────────────────────────────────────────────────┘
 
@@ -624,10 +777,10 @@ CACHE_TTL_HOURS=72  # Default: 72 hours (3 days)
                         (Role: Executive/Employee)
                                 ↓
                     ┌───────────────────────┐
-                    │   Streamlit Web UI    │
-                    │  Professional Theme   │
-                    │  🔄 S3 Refresh Button │
-                    │  🗑️ Cache Clear Button│
+                    │   Chainlit Console    │
+                    │  OAuth + RBAC Guard   │
+                    │  🔄 Refresh Action    │
+                    │  🗑️ Cache Clear Action│
                     └──────────┬────────────┘
                                ↓
                     ┌──────────────────────┐
@@ -953,17 +1106,17 @@ Suggestions:
 - Check region supports Nova Micro model
 - Verify IAM permissions for Bedrock access
 
-### Issue: "Streamlit not starting"
+### Issue: "Chainlit not starting"
 - Ensure UV is installed: `uv --version`
-- Run with UV: `uv run python -m streamlit run src/hr_bot/ui/app.py`
+- Run with UV: `uv run chainlit run src/hr_bot/ui/chainlit_app.py --host 0.0.0.0 --port 8501`
 - Check port 8501 is not in use: `lsof -i :8501`
-- Try different port: `uv run python -m streamlit run src/hr_bot/ui/app.py --server.port=8502`
+- Try different port: `uv run chainlit run src/hr_bot/ui/chainlit_app.py --host 0.0.0.0 --port 8502`
 - Check dependencies: `uv sync`
 
-### Issue: "UI showing raw HTML"
+### Issue: "Chainlit UI stuck on loading"
 - Clear browser cache
 - Hard refresh: Cmd+Shift+R (Mac) or Ctrl+Shift+R (Windows)
-- Restart Streamlit server
+- Restart the Chainlit service: `sudo systemctl restart chat-chainlit.service`
 
 ### Issue: "Slow responses"
 - First query is slower (building indexes)
@@ -975,7 +1128,7 @@ Suggestions:
 
 - [CrewAI Documentation](https://docs.crewai.com)
 - [Amazon Bedrock Documentation](https://docs.aws.amazon.com/bedrock/)
-- [Streamlit Documentation](https://docs.streamlit.io)
+- [Chainlit Documentation](https://docs.chainlit.io)
 - [API Deck Documentation](https://developers.apideck.com/docs)
 - [LangChain Documentation](https://python.langchain.com/docs/get_started/introduction)
 
@@ -983,8 +1136,10 @@ Suggestions:
 
 ## 📝 Changelog
 
+> ℹ️ Releases prior to v5.5 reference the legacy Streamlit UI and are preserved for historical context. Chainlit replaces it starting in v5.5.
+
 ### Version 5.0 (Current) - **S3 Intelligence & Role-Based Access** 🚀
-**Released**: November 6, 2025  
+**Released**: November 6, 2025
 **Status**: ✅ Production Ready | Enterprise-Grade S3 Integration
 
 #### 🌟 **Major Features**
@@ -1032,7 +1187,7 @@ Suggestions:
 - 📊 **ENHANCED VALIDATION**: Relevance checking before presenting information
 
 #### 🎨 **UI/UX Updates**
-- ✅ Professional Streamlit web UI with premium dark theme
+- ✅ Chainlit operator console with premium dark theme
 - ✅ Real-time agent status (Analyzing → Searching → Preparing)
 - ✅ Full conversation memory and context awareness
 - ✅ Mobile-responsive layout with purple gradient theme
@@ -1090,20 +1245,20 @@ For questions or issues:
 
 ## 🏆 **Production Readiness**
 
-✅ **100% Test Pass Rate** (10/10 tests)  
-✅ **Zero Critical Issues**  
-✅ **Zero Hallucinations Detected**  
-✅ **100% Content Safety Detection**  
-✅ **Cost-Optimized** (75% cheaper than GPT-4)  
-✅ **Enterprise-Grade Security**  
+✅ **100% Test Pass Rate** (10/10 tests)
+✅ **Zero Critical Issues**
+✅ **Zero Hallucinations Detected**
+✅ **100% Content Safety Detection**
+✅ **Cost-Optimized** (75% cheaper than GPT-4)
+✅ **Enterprise-Grade Security**
 
-**Deployment Status**: ✅ **APPROVED FOR PRODUCTION**  
-**Confidence Level**: **HIGH**  
+**Deployment Status**: ✅ **APPROVED FOR PRODUCTION**
+**Confidence Level**: **HIGH**
 **Last Validated**: October 29, 2025
 
 ---
 
-**Built with ❤️ using CrewAI, Amazon Bedrock Nova Pro, and Streamlit**
+**Built with ❤️ using CrewAI, Amazon Bedrock Nova Pro, and Chainlit**
 
 **Version: 3.0** | **License: MIT** | **Status: Production Ready** 🚀
 
@@ -1114,7 +1269,7 @@ For questions or issues:
 ### 💻 Crafted with Code & Coffee ☕
 
 ```
-  ____    _    ___ ____  _   _ 
+  ____    _    ___ ____  _   _
  / ___|  / \  |_ _/ ___|| | | |
  \___ \ / _ \  | |\___ \| |_| |
   ___) / ___ \ | | ___) |  _  |
@@ -1133,11 +1288,11 @@ For questions or issues:
 
 ### 🎯 **Key Achievements**
 
-🏆 **Dual-Tool Intelligence** - First HR bot with Master Actions + Policy fusion  
-🛡️ **Zero Hallucination** - 100% factual accuracy with validation system  
-🔒 **Enterprise Security** - Multi-layer content safety & NSFW blocking  
-💰 **Cost Optimized** - 75% cheaper than GPT-4 with Amazon Nova Pro  
-⚡ **Production Ready** - 100% test pass rate, zero critical issues  
+🏆 **Dual-Tool Intelligence** - First HR bot with Master Actions + Policy fusion
+🛡️ **Zero Hallucination** - 100% factual accuracy with validation system
+🔒 **Enterprise Security** - Multi-layer content safety & NSFW blocking
+💰 **Cost Optimized** - 75% cheaper than GPT-4 with Amazon Nova Pro
+⚡ **Production Ready** - 100% test pass rate, zero critical issues
 
 ### 📊 **By The Numbers**
 
@@ -1152,7 +1307,7 @@ For questions or issues:
 
 ---
 
-**Powered by:**  
-AWS Bedrock Nova Pro • CrewAI Framework • Streamlit UI • Hybrid RAG • Semantic Caching
+**Powered by:**
+AWS Bedrock Nova Pro • CrewAI Framework • Chainlit UI • Hybrid RAG • Semantic Caching
 
 </div>

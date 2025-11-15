@@ -1,7 +1,7 @@
 # Prompt Improvements v3.2.1
 
-**Date:** November 1, 2025  
-**Version:** v3.2.1 (Prompt Enhancement Release)  
+**Date:** November 1, 2025
+**Version:** v3.2.1 (Prompt Enhancement Release)
 **Status:** ✅ DEPLOYED & TESTED
 
 ---
@@ -32,9 +32,9 @@ This update addresses two key user experience improvements:
 1. **Capability Questions** ("what can you do", "how can you help", "what do you know"):
    Respond warmly WITHOUT searching HR documents:
    "Hi! I'm Inara, your HR assistant, and I'm here to make your work life easier! 😊
-   
+
    Here's how I can help you:
-   
+
    📋 **HR Policies & Procedures**
    - Leave policies (annual, sick, emergency)
    - Benefits information (health insurance, retirement plans)
@@ -63,8 +63,8 @@ goal: >
   Provide accurate, warm, and empathetic HR guidance...
   Build rapport through genuine, human connections while maintaining professionalism.
 backstory: >
-  You are Inara, a friendly and approachable HR assistant who genuinely cares about 
-  helping employees. You combine professional expertise with a warm, conversational 
+  You are Inara, a friendly and approachable HR assistant who genuinely cares about
+  helping employees. You combine professional expertise with a warm, conversational
   tone that makes people feel comfortable asking questions.
 ```
 
@@ -302,15 +302,15 @@ I hope this helps! Let me know if you need anything else - I'm always here if yo
 
 **Before:**
 ```
-I searched our HR policy database, but I couldn't find any information about this topic. 
+I searched our HR policy database, but I couldn't find any information about this topic.
 Please contact your HR department directly for assistance with this matter.
 ```
 
 **After:**
 ```
-I really wanted to help you with this, but I searched our HR policy database thoroughly 
-and couldn't find specific information about this topic. I'd recommend reaching out to 
-your HR department directly - they'll be able to give you the most accurate guidance. 
+I really wanted to help you with this, but I searched our HR policy database thoroughly
+and couldn't find specific information about this topic. I'd recommend reaching out to
+your HR department directly - they'll be able to give you the most accurate guidance.
 Sorry I couldn't be more helpful on this one!
 ```
 
@@ -365,8 +365,8 @@ After this deployment, please gather feedback on:
 - ✅ Improved user experience and engagement
 - ✅ Zero breaking changes or code modifications
 
-**Deployment Status:** ✅ COMPLETE  
-**Testing Status:** ✅ VALIDATED  
+**Deployment Status:** ✅ COMPLETE
+**Testing Status:** ✅ VALIDATED
 **Client Approval:** ✅ REQUESTED
 
 ---

@@ -1,8 +1,8 @@
 # v3.2 Deployment Guide
 
-**Version:** v3.2 (Security & Stability Release)  
-**Status:** ✅ READY FOR DEPLOYMENT  
-**Deployment Time:** 5 minutes  
+**Version:** v3.2 (Security & Stability Release)
+**Status:** ✅ READY FOR DEPLOYMENT
+**Deployment Time:** 5 minutes
 **Downtime:** 2-3 seconds (or zero with blue-green)
 
 ---
@@ -64,7 +64,7 @@ git tag -a v3.2 -m "v3.2: Security & Stability Release"
 streamlit run src/hr_bot/ui/app.py
 ```
 
-**Total Time:** 2-3 minutes  
+**Total Time:** 2-3 minutes
 **Downtime:** 2-3 seconds
 
 ---
@@ -90,7 +90,7 @@ streamlit run src/hr_bot/ui/app.py --server.port 8502
 # After 1 hour, stop v3.1: kill <old_PID>
 ```
 
-**Total Time:** 5 minutes  
+**Total Time:** 5 minutes
 **Downtime:** 0 seconds
 
 ---
@@ -196,7 +196,7 @@ streamlit run src/hr_bot/ui/app.py
 # Done! Back to v3.1 in 30 seconds
 ```
 
-**Rollback Time:** 30 seconds  
+**Rollback Time:** 30 seconds
 **Data Loss:** None (cache persists)
 
 ---
@@ -342,9 +342,9 @@ grep "AWS rate limit" logs/latest.log | wc -l
 
 ---
 
-**Deployment Status:** Ready ✅  
-**Recommended Deployment Window:** Off-peak hours (if available)  
-**Estimated Success Rate:** 95%  
+**Deployment Status:** Ready ✅
+**Recommended Deployment Window:** Off-peak hours (if available)
+**Estimated Success Rate:** 95%
 **Rollback Time:** 30 seconds
 
 ---

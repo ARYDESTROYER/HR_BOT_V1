@@ -5,7 +5,7 @@ Demonstration of Agent Reasoning Leak Fix
 This document shows what the fix does to prevent agent reasoning leaks.
 
 ## Problem
-When the RAG tool returned "NO_RELEVANT_DOCUMENTS", the agent sometimes leaked 
+When the RAG tool returned "NO_RELEVANT_DOCUMENTS", the agent sometimes leaked
 its internal reasoning process to the user, showing text like:
 
 ```
@@ -59,21 +59,21 @@ def _clean_agent_reasoning_leaks(self, text: str) -> str:
         "\\nAction:",
         "\\nObservation:",
     ]
-    
+
     has_reasoning_leak = any(marker in text for marker in reasoning_markers)
-    
+
     if has_reasoning_leak:
         # Extract everything BEFORE the first reasoning leak
         lines = text.split('\\n')
         clean_lines = []
-        
+
         for line in lines:
             if line.strip().startswith(('---', 'Thought:', 'Action:', 'Observation:')):
                 break
             clean_lines.append(line)
-        
+
         cleaned_text = '\\n'.join(clean_lines).strip()
-        
+
         # If nothing left, provide fallback
         if not cleaned_text or len(cleaned_text) < 50:
             return (
@@ -82,9 +82,9 @@ def _clean_agent_reasoning_leaks(self, text: str) -> str:
                 "Please try rephrasing your question, or contact your HR department directly for assistance.\\n\\n"
                 "Is there anything else I can help you with?"
             )
-        
+
         return cleaned_text
-    
+
     return text
 ```
 
@@ -100,7 +100,7 @@ Sources: View Leave Balance
 
 **After Fix (GOOD):**
 ```
-I understand you're concerned about a colleague experiencing sexual harassment. 
+I understand you're concerned about a colleague experiencing sexual harassment.
 This is a serious matter that requires immediate attention.
 
 **Policy Information**

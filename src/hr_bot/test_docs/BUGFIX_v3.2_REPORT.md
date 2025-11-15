@@ -13,11 +13,11 @@ Sources: View Leave Balance
 This happened when asking: "A colleague of mine is being sexually harassed, what do I do"
 
 ## Root Cause Analysis
-When the RAG tool returned "NO_RELEVANT_DOCUMENTS" (low confidence match), the agent's 
+When the RAG tool returned "NO_RELEVANT_DOCUMENTS" (low confidence match), the agent's
 internal reasoning process leaked into the user-facing response instead of being hidden.
 
-This was a **tool failure handling issue** in CrewAI - the agent framework sometimes 
-exposes "Thought:", "Action:", and "Observation:" markers when tools return unexpected 
+This was a **tool failure handling issue** in CrewAI - the agent framework sometimes
+exposes "Thought:", "Action:", and "Observation:" markers when tools return unexpected
 outputs or empty results.
 
 ## Frequency
@@ -37,7 +37,7 @@ Added explicit rule to NEVER expose internal reasoning:
 ### ✅ Layer 2: Task Instructions (tasks.yaml)
 Added fallback handling for tool failures:
 ```yaml
-- **If tool returns "NO_RELEVANT_DOCUMENTS" or fails:** 
+- **If tool returns "NO_RELEVANT_DOCUMENTS" or fails:**
   Use the exact fallback message. DO NOT improvise.
 ```
 
@@ -55,21 +55,21 @@ def _clean_agent_reasoning_leaks(self, text: str) -> str:
         "---\\nThought:", "---\\nAction:", "---\\nObservation:",
         "\\nThought:", "\\nAction:", "\\nObservation:",
     ]
-    
+
     has_reasoning_leak = any(marker in text for marker in reasoning_markers)
-    
+
     if has_reasoning_leak:
         # Extract clean text before reasoning leak
         lines = text.split('\\n')
         clean_lines = []
-        
+
         for line in lines:
             if line.strip().startswith(('---', 'Thought:', 'Action:', 'Observation:')):
                 break
             clean_lines.append(line)
-        
+
         cleaned_text = '\\n'.join(clean_lines).strip()
-        
+
         # Fallback if nothing left
         if not cleaned_text or len(cleaned_text) < 50:
             return (
@@ -78,9 +78,9 @@ def _clean_agent_reasoning_leaks(self, text: str) -> str:
                 "Please try rephrasing your question, or contact your HR department "
                 "directly for assistance.\\n\\nIs there anything else I can help you with?"
             )
-        
+
         return cleaned_text
-    
+
     return text
 ```
 
@@ -143,7 +143,7 @@ All fixes implemented and tested. No breaking changes.
 ## Confidence Level
 🎯 **HIGH** - Triple-layer defense system ensures reasoning leaks are caught:
 - Layer 1 (Agent Config): Prevents agent from generating leaks
-- Layer 2 (Task Config): Instructs proper fallback handling  
+- Layer 2 (Task Config): Instructs proper fallback handling
 - Layer 3 (Post-Processing): Catches and cleans any leaks that slip through
 
 Even if CrewAI framework has edge cases, Layer 3 guarantees clean output.

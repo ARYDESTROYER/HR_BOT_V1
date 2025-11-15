@@ -132,7 +132,7 @@ Execute HR system query.
   - `"time_off"`: Get time-off requests
   - `"payroll"`: Get payroll information
   - `"benefits"`: Get benefits information
-  
+
 - `employee_id` (str, optional): Employee ID for specific queries
 - `filters` (str, optional): JSON string with additional filters
 
@@ -611,17 +611,17 @@ from langchain_community.document_loaders import PyPDFLoader
 
 def _load_documents(self) -> List[Document]:
     documents = []
-    
+
     # Load .docx
     for file in self.data_dir.glob("*.docx"):
         loader = Docx2txtLoader(str(file))
         documents.extend(loader.load())
-    
+
     # Load .pdf
     for file in self.data_dir.glob("*.pdf"):
         loader = PyPDFLoader(str(file))
         documents.extend(loader.load())
-    
+
     return documents
 ```
 

@@ -69,13 +69,13 @@ def _get_s3_version_hash(self) -> Tuple[str, dict]:
     """Compute SHA256 hash from S3 object ETags"""
     # Lists S3 objects, extracts ETags
     # Returns (version_hash, metadata)
-    
+
 def _is_cache_valid(self) -> Tuple[bool, str]:
     """ETag-based validation with TTL check"""
     # Checks manifest, version file, TTL, file existence
     # Compares cached version with current S3 version
     # Returns (is_valid, reason)
-    
+
 def _save_cache_metadata(self, version_hash: str, metadata: dict):
     """Save version hash and document metadata"""
     # Saves .s3_version file
@@ -296,6 +296,6 @@ s3_loader = S3DocumentLoader(cache_ttl=3600)
 
 ---
 
-**Implementation Date**: January 8, 2024  
-**Version**: v4.3  
+**Implementation Date**: January 8, 2024
+**Version**: v4.3
 **Status**: ✅ Production Ready

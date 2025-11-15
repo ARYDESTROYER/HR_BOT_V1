@@ -1,8 +1,8 @@
 # 🔒 PRODUCTION SECURITY AUDIT v3.2.2 - Comprehensive Backdoor & Vulnerability Analysis
 
-**Audit Date:** November 2, 2025  
-**Version:** v3.2.2 (Post-UX Improvements)  
-**Scope:** Full production security review - backdoors, loops, injection attacks, data leaks  
+**Audit Date:** November 2, 2025
+**Version:** v3.2.2 (Post-UX Improvements)
+**Scope:** Full production security review - backdoors, loops, injection attacks, data leaks
 **Severity Scale:** 🔴 CRITICAL | 🟠 HIGH | 🟡 MEDIUM | 🟢 LOW
 
 ---
@@ -25,8 +25,8 @@ Conducted deep security analysis across all code paths, focusing on:
 
 ### 1. **SQL INJECTION via LIKE Pattern in Memory Queries**
 
-**Location:** `src/hr_bot/crew.py` lines 964-972, 1026-1030  
-**Severity:** 🔴 CRITICAL  
+**Location:** `src/hr_bot/crew.py` lines 964-972, 1026-1030
+**Severity:** 🔴 CRITICAL
 **Risk:** Database compromise, data extraction, DoS
 
 **Vulnerable Code:**
@@ -89,8 +89,8 @@ cursor.execute(
 
 ### 2. **Unbounded Memory Consumption in Query Index**
 
-**Location:** `src/hr_bot/utils/cache.py` lines 72-73  
-**Severity:** 🟠 HIGH  
+**Location:** `src/hr_bot/utils/cache.py` lines 72-73
+**Severity:** 🟠 HIGH
 **Risk:** Memory exhaustion DoS, application crash
 
 **Vulnerable Code:**
@@ -113,7 +113,7 @@ def _build_query_index(self):
 # Attacker sends thousands of unique queries
 for i in range(100000):
     crew.query_with_cache(f"unique query {i} {random_string}")
-    
+
 # Result: query_index grows unbounded
 # Memory usage: ~1KB per entry × 100,000 = ~100MB
 # Can exhaust available RAM
@@ -130,14 +130,14 @@ for i in range(100000):
 ```python
 def _build_query_index(self):
     cache_files = list(self.cache_dir.glob("*.json"))
-    
+
     # Sort by modification time, newest first
     cache_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
-    
+
     # Only index recent entries up to max_index_entries
     for cache_file in cache_files[:self.max_index_entries]:
         # ... index entry
-        
+
 def set(self, query: str, response: str, context: str = "") -> bool:
     # Trim query_index if it exceeds limit
     if len(self.query_index) >= self.max_index_entries:
@@ -149,8 +149,8 @@ def set(self, query: str, response: str, context: str = "") -> bool:
 
 ### 3. **Environment Variable Credential Exposure**
 
-**Location:** `src/hr_bot/crew.py` lines 203-210  
-**Severity:** 🟠 HIGH  
+**Location:** `src/hr_bot/crew.py` lines 203-210
+**Severity:** 🟠 HIGH
 **Risk:** Credential leakage, unauthorized AWS access
 
 **Vulnerable Code:**
@@ -191,11 +191,11 @@ class SecureCredentials:
     def __init__(self):
         self._aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
         self._aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
-    
+
     @property
     def aws_access_key(self):
         return self._aws_access_key
-    
+
     @property
     def aws_secret_key(self):
         return self._aws_secret_key
@@ -215,14 +215,14 @@ llm = LLM(
 
 ### 4. **Path Traversal in Cache Directory**
 
-**Location:** `src/hr_bot/utils/cache.py` line 50-51  
-**Severity:** 🟡 MEDIUM  
+**Location:** `src/hr_bot/utils/cache.py` line 50-51
+**Severity:** 🟡 MEDIUM
 **Risk:** Arbitrary file read/write, cache poisoning
 
 **Vulnerable Code:**
 ```python
 def __init__(
-    self, 
+    self,
     cache_dir: str = "storage/response_cache",  # User-controllable!
     # ...
 ):
@@ -254,12 +254,12 @@ import os
 def __init__(self, cache_dir: str = "storage/response_cache", ...):
     # Resolve to absolute path and validate
     cache_path = Path(cache_dir).resolve()
-    
+
     # Ensure it's within expected storage directory
     expected_base = Path("storage").resolve()
     if not str(cache_path).startswith(str(expected_base)):
         raise ValueError(f"Invalid cache directory: {cache_dir}")
-    
+
     self.cache_dir = cache_path
     self.cache_dir.mkdir(parents=True, exist_ok=True)
 ```
@@ -268,8 +268,8 @@ def __init__(self, cache_dir: str = "storage/response_cache", ...):
 
 ### 5. **Regex DoS (ReDoS) in Content Safety Checks**
 
-**Location:** `src/hr_bot/crew.py` lines 549-576  
-**Severity:** 🟡 MEDIUM  
+**Location:** `src/hr_bot/crew.py` lines 549-576
+**Severity:** 🟡 MEDIUM
 **Risk:** CPU exhaustion, application hang
 
 **Vulnerable Code:**
@@ -344,8 +344,8 @@ if len(normalized) > 10000:
 
 ### 6. **Insecure Cache Key Generation**
 
-**Location:** `src/hr_bot/utils/cache.py` lines 166-169  
-**Severity:** 🟡 MEDIUM  
+**Location:** `src/hr_bot/utils/cache.py` lines 166-169
+**Severity:** 🟡 MEDIUM
 **Risk:** Cache collision, cache poisoning
 
 **Vulnerable Code:**
@@ -382,7 +382,7 @@ def _generate_cache_key(self, query: str, context: str = "") -> str:
     """Generate unique cache key with separator."""
     # Use explicit separator to prevent collisions
     combined = f"Q:{query.strip()}|C:{context.strip()}"
-    
+
     # Or use structured approach:
     data = {
         "query": query.strip(),
@@ -390,7 +390,7 @@ def _generate_cache_key(self, query: str, context: str = "") -> str:
         "version": "v1"  # Version for cache invalidation
     }
     combined = json.dumps(data, sort_keys=True)
-    
+
     return hashlib.sha256(combined.encode("utf-8")).hexdigest()
 ```
 
@@ -400,8 +400,8 @@ def _generate_cache_key(self, query: str, context: str = "") -> str:
 
 ### 7. **Sensitive Information in Debug Logs**
 
-**Location:** `src/hr_bot/utils/cache.py` lines 387-396  
-**Severity:** 🟢 LOW  
+**Location:** `src/hr_bot/utils/cache.py` lines 387-396
+**Severity:** 🟢 LOW
 **Risk:** Information disclosure in logs
 
 **Vulnerable Code:**
@@ -446,12 +446,12 @@ def _sanitize_for_logging(self, text: str, max_length: int = 50) -> str:
     sanitized = re.sub(r'\b[A-Za-z]+@[A-Za-z]+\.[A-Z|a-z]{2,}\b', '[EMAIL]', text)
     sanitized = re.sub(r'\b\d{3}-\d{2}-\d{4}\b', '[SSN]', sanitized)
     sanitized = re.sub(r'\b\d{10}\b', '[PHONE]', sanitized)
-    
+
     # Hash-based anonymization
     if len(sanitized) > max_length:
         hash_suffix = hashlib.md5(text.encode()).hexdigest()[:8]
         return f"{sanitized[:max_length]}...[hash:{hash_suffix}]"
-    
+
     return sanitized
 
 cache_entry = {
@@ -488,12 +488,12 @@ cache_entry = {
 ### Potential Infinite/Long-Running Loops
 
 #### Loop #1: Query Index Iteration (DoS Risk)
-**Location:** `src/hr_bot/utils/cache.py` lines 180-220  
+**Location:** `src/hr_bot/utils/cache.py` lines 180-220
 **Risk:** O(n) search can become very slow with large index
 
 ```python
 def get(self, query: str, context: str = "") -> Optional[str]:
-    # ... 
+    # ...
     # PROBLEM: Loops through entire query_index for every cache lookup
     for cache_key, cached_query, cached_keywords in self.query_index:
         similarity = self._calculate_similarity(query_keywords, cached_keywords)
@@ -503,7 +503,7 @@ def get(self, query: str, context: str = "") -> Optional[str]:
 **Fix:** Implement index size limit (see Vuln #2 fix)
 
 #### Loop #2: BM25 Token Processing
-**Location:** `src/hr_bot/tools/hybrid_rag_tool.py` lines 440-444  
+**Location:** `src/hr_bot/tools/hybrid_rag_tool.py` lines 440-444
 **Risk:** Very long documents can cause slow tokenization
 
 ```python
@@ -521,7 +521,7 @@ if len(reformulated_query) > MAX_QUERY_LENGTH:
 ```
 
 #### Loop #3: Memory Database Iteration
-**Location:** `src/hr_bot/crew.py` lines 964-1000  
+**Location:** `src/hr_bot/crew.py` lines 964-1000
 **Risk:** No limit on memory entries, could fetch millions of rows
 
 ```python
@@ -626,10 +626,10 @@ cursor.execute(
 
 ## ✅ Sign-Off
 
-**Audit Completed:** November 2, 2025  
-**Total Vulnerabilities:** 7 (1 CRITICAL, 2 HIGH, 3 MEDIUM, 1 LOW)  
-**No Backdoors Found:** ✅  
-**Infinite Loop Risks:** 3 (all addressable)  
+**Audit Completed:** November 2, 2025
+**Total Vulnerabilities:** 7 (1 CRITICAL, 2 HIGH, 3 MEDIUM, 1 LOW)
+**No Backdoors Found:** ✅
+**Infinite Loop Risks:** 3 (all addressable)
 
 **Recommendation:** Deploy P0 and P1 fixes immediately, P2-P4 within 1 month
 

@@ -1,6 +1,6 @@
 [project]
 name = "hr_bot"
-version = "5.5"
+version = "6.0"
 description = "An HR assistant powered by AWS Bedrock Nova Lite v1 and CrewAI with ETag-based S3 smart caching and role-based document access"
 authors = [{ name = "Your Name", email = "you@example.com" }]
 requires-python = ">=3.10,<3.14"
@@ -39,7 +39,7 @@ dependencies = [
     "datasets>=2.19.0",
     "evaluate>=0.4.1",
     # UI
-    "streamlit>=1.38.0",
+    # Streamlit is retained as a legacy/rollback UI. Move to optional deps below.
     # FastAPI & Production API
     "fastapi>=0.109.0",
     "uvicorn[standard]>=0.27.0",
@@ -68,6 +68,9 @@ ragas_eval = "hr_bot.eval.ragas_eval:main"
 ragas_prod_eval = "hr_bot.eval.ragas_production_eval:main"
 api_server = "hr_bot.api.main:main"
 chainlit_app = "chainlit:cli"
+
+[project.optional-dependencies]
+legacy = ["streamlit>=1.38.0"]
 
 [build-system]
 requires = ["hatchling"]

@@ -1,0 +1,25 @@
+[project]
+user_env = []
+session_timeout = 3600
+user_session_timeout = 604800
+cache = false
+persist_user_env = false
+allow_origins = ["*"]
+
+[features]
+unsafe_allow_html = false
+latex = false
+user_message_autoscroll = true
+edit_message = true
+allow_thread_sharing = false
+
+[UI]
+name = "Inara HR Assistant"
+description = "Secure HR copilot with role-based access"
+default_theme = "dark"
+layout = "wide"
+alert_style = "modern"
+logo_file_url = ""
+
+[meta]
+generated_by = "chainlit-setup"
