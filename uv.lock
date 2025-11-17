@@ -1452,7 +1452,7 @@ wheels = [
 
 [[package]]
 name = "hr-bot"
-version = "6.0"
+version = "6.5"
 source = { editable = "." }
 dependencies = [
     { name = "authlib" },

@@ -294,7 +294,6 @@ class ResponseCache:
                 self.stats["hits"] += 1
                 self.stats["memory_hits"] += 1
                 self.stats["exact_hits"] += 1
-                self._update_efficiency()
                 logger.info(f"✅ EXACT MEMORY cache hit for query: {query[:50]}...")
                 return cached["response"]
             else:
@@ -326,7 +325,6 @@ class ResponseCache:
                     self.stats["hits"] += 1
                     self.stats["disk_hits"] += 1
                     self.stats["exact_hits"] += 1
-                    self._update_efficiency()
                     logger.info(f"✅ EXACT DISK cache hit for query: {query[:50]}...")
                     return cached["response"]
                 else:
@@ -476,15 +474,6 @@ class ResponseCache:
             
             logger.debug(f"🧹 Trimmed memory cache, removed {items_to_remove} items")
     
-    def _update_efficiency(self):
-        """Calculate and update cache efficiency metrics"""
-        total = self.stats["hits"] + self.stats["misses"]
-        if total > 0:
-            self.stats["cache_efficiency"] = (self.stats["hits"] / total) * 100
-        
-        # Save updated stats
-        self._save_stats()
-    
     def clear_expired(self):
         """Remove all expired cache entries from disk"""
         expired_count = 0
@@ -540,6 +529,24 @@ class ResponseCache:
             "disk_cache_files": len(list(self.cache_dir.glob("*.json"))),
             "query_index_size": len(self.query_index)
         }
+    
+    def _update_efficiency(self):
+        """Update cache efficiency statistics"""
+        total_queries = self.stats["total_queries"]
+        hits = self.stats["hits"]
+        
+        # Calculate efficiency metrics
+        hit_rate = (hits / total_queries * 100) if total_queries > 0 else 0
+        exact_rate = (self.stats["exact_hits"] / total_queries * 100) if total_queries > 0 else 0
+        semantic_rate = (self.stats["semantic_hits"] / total_queries * 100) if total_queries > 0 else 0
+        
+        # Update efficiency stats
+        self.stats["hit_rate"] = hit_rate
+        self.stats["exact_hit_rate"] = exact_rate
+        self.stats["semantic_hit_rate"] = semantic_rate
+        
+        # Save updated stats to disk
+        self._save_stats()
     
     def _load_stats(self):
         """Load cache statistics from disk"""
