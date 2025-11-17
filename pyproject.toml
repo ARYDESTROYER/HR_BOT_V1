@@ -2,7 +2,7 @@
 name = "hr_bot"
 version = "6.6"
 description = "An HR assistant powered by AWS Bedrock Nova Lite v1 and CrewAI with ETag-based S3 smart caching, role-based document access, and enhanced RAG filtering"
-authors = [{ name = "Your Name", email = "you@example.com" }]
+authors = [{ name = "Saish Shinde", email = "saish.shinde.jb@gmail.com" }]
 requires-python = ">=3.10,<3.14"
 dependencies = [
     # Core CrewAI
