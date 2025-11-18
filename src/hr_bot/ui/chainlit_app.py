@@ -19,6 +19,11 @@ from hr_bot.utils.s3_loader import S3DocumentLoader
 
 logger = logging.getLogger("hr_bot.chainlit")
 
+# Centralized branding configuration read from env or default
+APP_NAME = os.getenv("APP_NAME", "Inara")
+APP_DESCRIPTION = os.getenv("APP_DESCRIPTION", "your intelligent assistant")
+APP_MASCOT_ICON = os.getenv("APP_MASCOT_ICON", "src/hr_bot/ui/assets/logo_mascot_light.png")
+
 # ---------------------------------------------------------------------------
 # Environment wiring
 # ---------------------------------------------------------------------------
@@ -39,7 +44,7 @@ if not os.getenv("CHAINLIT_AUTH_SECRET"):
     )
 
 SUPPORT_CONTACT_EMAIL = os.getenv("SUPPORT_CONTACT_EMAIL", "support@company.com")
-DEFAULT_PLACEHOLDER = "Ask me anything about HR policies, benefits, or procedures..."
+DEFAULT_PLACEHOLDER = "Ask me anything, I'm here to help."
 
 WARMUP_QUERIES: List[str] = [
     "What is the sick leave policy?",
@@ -125,7 +130,7 @@ async def _get_bot(role: str) -> HrBot:
     async with lock:
         if cached := BOT_CACHE.get(role_key):
             return cached
-        logger.info("Initializing HrBot for role=%s", role_key)
+            logger.info("Initializing HrBot for role=%s", role_key)
         bot = await _run_blocking(HrBot, role_key, True)
         BOT_CACHE[role_key] = bot
         return bot
@@ -274,7 +279,7 @@ def _compose_dashboard(display_name: str, role: str) -> str:
     return (
         f"### Welcome back, {display_name}\n"
         f"Access level: **{role.title()}**\n\n"
-        "Your intelligent HR companion for policies, benefits, and workplace guidance — available 24/7.\n\n"
+        f"{APP_DESCRIPTION} — available 24/7.\n\n"
         f"Need help signing in or resetting access? Email [{SUPPORT_CONTACT_EMAIL}](mailto:{SUPPORT_CONTACT_EMAIL})."
     )
 
@@ -297,7 +302,7 @@ async def _send_dashboard(display_name: str, role: str) -> None:
         ),
     ]
     message = cl.Message(
-        author="Inara Control Center",
+        author=cl.User(identifier=APP_NAME.lower().replace(" ", "_"), display_name=f"{APP_NAME} Control Center"),
         content=_compose_dashboard(display_name, role),
         actions=actions,
     )
@@ -427,7 +432,7 @@ async def on_chat_start() -> None:
     await _ensure_warm(role, bot)
     await _send_dashboard(display_name, role)
     await cl.Message(
-        author="Inara",
+        author=cl.User(identifier=APP_NAME.lower().replace(" ", "_"), display_name=APP_NAME),
         content=(
             "I'm online. Ask any HR policy, benefits, or workflow question using the chat input below.\n\n"
             f"_Tip_: {DEFAULT_PLACEHOLDER}"
@@ -445,7 +450,7 @@ async def on_message(message: cl.Message) -> None:
     _set_history(history)
 
     progress = cl.Message(
-        author="Inara",
+        author=cl.User(identifier=APP_NAME.lower().replace(" ", "_"), display_name=APP_NAME),
         content="Analyzing your request...",
     )
     await progress.send()
