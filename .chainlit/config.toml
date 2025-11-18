@@ -14,12 +14,15 @@ edit_message = true
 allow_thread_sharing = false
 
 [UI]
-name = "Inara HR Assistant"
-description = "Secure HR copilot with role-based access"
+name = "Inara"
+description = "your intelligent assistant"
 default_theme = "dark"
 layout = "wide"
 alert_style = "modern"
-logo_file_url = ""
+# Serve logos from the public directory (prefer absolute path for clarity)
+logo_file_url = "/public/logo_light.png"
+# Default avatar file endpoint (front-end uses this or falls back to /avatars/{name})
+default_avatar_file_url = "/avatars/inara"
 
 [meta]
 generated_by = "chainlit-setup"
