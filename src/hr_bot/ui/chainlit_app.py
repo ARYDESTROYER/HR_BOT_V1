@@ -302,7 +302,7 @@ async def _send_dashboard(display_name: str, role: str) -> None:
         ),
     ]
     message = cl.Message(
-        author=cl.User(identifier=APP_NAME.lower().replace(" ", "_"), display_name=f"{APP_NAME} Control Center"),
+        author=f"{APP_NAME} Control Center",
         content=_compose_dashboard(display_name, role),
         actions=actions,
     )
@@ -432,7 +432,7 @@ async def on_chat_start() -> None:
     await _ensure_warm(role, bot)
     await _send_dashboard(display_name, role)
     await cl.Message(
-        author=cl.User(identifier=APP_NAME.lower().replace(" ", "_"), display_name=APP_NAME),
+        author=APP_NAME,
         content=(
             "I'm online. Ask any HR policy, benefits, or workflow question using the chat input below.\n\n"
             f"_Tip_: {DEFAULT_PLACEHOLDER}"
@@ -450,7 +450,7 @@ async def on_message(message: cl.Message) -> None:
     _set_history(history)
 
     progress = cl.Message(
-        author=cl.User(identifier=APP_NAME.lower().replace(" ", "_"), display_name=APP_NAME),
+        author=APP_NAME,
         content="Analyzing your request...",
     )
     await progress.send()
