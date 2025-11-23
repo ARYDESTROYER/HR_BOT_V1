@@ -1,5 +1,14 @@
 # HR Bot v6.7 - Enterprise-Grade AI HR Assistant with S3 Intelligence
-## **Production-Ready | Role-Based Access | Smart S3 Caching | Enhanced RAG Filtering** A next-generation HR assistant powered by **CrewAI** and **Amazon Bedrock Nova Lite**, featuring **Role-Based Document Access**, **ETag-Based S3 Smart Caching**, and **Hybrid RAG** with a Chainlit production UI. ## Chainlit Front-End (v6.0) The Streamlit experience is now fully migrated to **Chainlit** for a lighter, more production-ready chat surface: - **Google / Azure AD OAuth** through Chainlit's native providers with the same RBAC checks (`EXECUTIVE_EMAILS`, `EMPLOYEE_EMAILS`).
+
+## **Production-Ready | Role-Based Access | Smart S3 Caching | Enhanced RAG Filtering**
+
+A next-generation HR assistant powered by **CrewAI** and **Amazon Bedrock Nova Lite**, featuring **Role-Based Document Access**, **ETag-Based S3 Smart Caching**, and **Hybrid RAG** with a Chainlit production UI.
+
+## Chainlit Front-End (v6.0)
+
+The Streamlit experience is now fully migrated to **Chainlit** for a lighter, more production-ready chat surface:
+
+- **Google / Azure AD OAuth** through Chainlit's native providers with the same RBAC checks (`EXECUTIVE_EMAILS`, `EMPLOYEE_EMAILS`).
 ## **What's New in v6.7?**
 ### **Chainlit Message Hardening & Empathetic UI tweaks**
 - Added `_author_as_string` guard so Chainlit messages never serialize complex `cl.User` objects (fixes "author must be a string" errors).
@@ -15,13 +24,24 @@
 - Expanded `stop_words` in `MasterActionsDatabase.search_actions()` to include `day`, `today`, and `work`, preventing onboarding questions from falsely triggering the "Apply for Half-Day Leave" guide.
 - `pyproject.toml` and `uv.lock` bumped to `6.7` to match this release/tag.
 
-## **What's New in v6.5?**
+## Chainlit Deployment Guide
+### 1. Runtime Command
+
+```bash
 cd HR_BOT_V1
 # If you want to activate the project venv manually (uv manages .venv by default):
 . .venv/bin/activate
 chainlit run src/hr_bot/ui/chainlit_app.py --host 0.0.0.0 --port 8501 --watch
-``` - `--port 8501` keeps the public endpoint identical to the previous Streamlit service.
-- `--watch` reloads the app automatically while iterating locally; drop it for production. ### 2. Environment Variables Set these variables (usually via the repository `.env` file or your deployment environment): | Variable | Purpose |
+```
+
+- `--port 8501` keeps the public endpoint identical to the previous Streamlit service.
+- `--watch` reloads the app automatically while iterating locally; drop it for production.
+
+### 2. Environment Variables
+
+Set these variables (usually via the repository `.env` file or your deployment environment):
+
+| Variable | Purpose |
 | --- | --- |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` | Bedrock + S3 access |
 | `BEDROCK_MODEL`, `BEDROCK_EMBED_MODEL`, `BEDROCK_EMBED_REGION` | LLM + embeddings |
@@ -33,13 +53,37 @@ chainlit run src/hr_bot/ui/chainlit_app.py --host 0.0.0.0 --port 8501 --watch
 | `CHAINLIT_OAUTH_CALLBACK_URL` | Should match the OAuth redirect (`http://<host>:<port>/oauth/callback`) |
 | `CHAINLIT_BASE_URL` | External base URL (e.g. `https://chat.testingurl.cloud`) used in auth links |
 | `CHAINLIT_AUTH_SECRET` | JWT signing secret (`chainlit create-secret` generates one) |
-| `CHAINLIT_MAX_WORKERS` | Size of the background executor for blocking CrewAI calls (defaults to 4) | > **Note:** The app will copy `GOOGLE_CLIENT_ID` → `OAUTH_GOOGLE_CLIENT_ID` (and the secret) if present for backward compatibility. For clarity, prefer setting the `CHAINLIT_` prefixed variables directly in production. ### 3. Authentication Flow 1. Users land on the Chainlit login screen and select “Continue with Google”.
+| `CHAINLIT_MAX_WORKERS` | Size of the background executor for blocking CrewAI calls (defaults to 4) |
+
+> **Note:** The app will copy `GOOGLE_CLIENT_ID` → `OAUTH_GOOGLE_CLIENT_ID` (and the secret) if present for backward compatibility. For clarity, prefer setting the `CHAINLIT_` prefixed variables directly in production.
+
+### 3. Authentication Flow
+
+1. Users land on the Chainlit login screen and select “Continue with Google”.
 2. Chainlit’s OAuth flow validates the ID token using the provided client ID/secret.
 3. `src/hr_bot/ui/chainlit_app.py` runs `_derive_role(email)` to assign Executive vs Employee access. Any email not in `EXECUTIVE_EMAILS`/`EMPLOYEE_EMAILS` is rejected.
-4. Approved users get a personalized welcome card plus chat access. #### Dev / Header-Based Login When `ALLOW_DEV_LOGIN=true`, Chainlit also accepts headers such as `X-Forwarded-Email`, `X-Dev-Email`, or `X-User-Email`. This is useful behind an internal proxy or when running automated tests. Disable the flag in production. ### 4. Admin Actions Two admin affordances appear on every session: | Action | What it does |
+4. Approved users get a personalized welcome card plus chat access.
+
+#### Dev / Header-Based Login
+
+When `ALLOW_DEV_LOGIN=true`, Chainlit also accepts headers such as `X-Forwarded-Email`, `X-Dev-Email`, or `X-User-Email`. This is useful behind an internal proxy or when running automated tests. Disable the flag in production.
+
+### 4. Admin Actions
+
+Two admin affordances appear on every session:
+
+| Action | What it does |
 | --- | --- |
 | **Refresh S3 Docs** | Clears the local S3 cache, forces a document re-download, deletes FAISS/BM25 indexes (`.rag_index`), clears the HrBot RAG cache, and resets in-memory bot instances. Mirrors the Streamlit button 1:1. |
-| **Clear Response Cache** | Calls `HrBot.response_cache.clear_all()` so cached answers can be re-generated. | Both run asynchronously and send success/failure messages inside the chat transcript. ### 5. Systemd Service Example Use the checked-in service file at `deploy/chat-chainlit.service` as an example (adjust paths and user as appropriate). In documentation we use repository-relative placeholders rather than server-specific absolute paths: ```ini
+| **Clear Response Cache** | Calls `HrBot.response_cache.clear_all()` so cached answers can be re-generated. |
+
+Both run asynchronously and send success/failure messages inside the chat transcript.
+
+### 5. Systemd Service Example
+
+Use the checked-in service file at `deploy/chat-chainlit.service` as an example (adjust paths and user as appropriate). In documentation we use repository-relative placeholders rather than server-specific absolute paths:
+
+```ini
 [Unit]
 Description=Inara HR Assistant (Chainlit)
 After=network.target [Service]
@@ -51,26 +95,64 @@ Restart=on-failure
 User=chat
 Group=chat [Install]
 WantedBy=multi-user.target
-``` Reload systemd and enable the service (update paths to your server layout before running): ```bash
+```
+
+Reload systemd and enable the service (update paths to your server layout before running):
+
+```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now chat-chainlit.service
-``` ### 6. Logging & Observability - Chainlit logs through the standard Python `logging` module. Set `LOG_LEVEL=INFO` (or `DEBUG`) to change verbosity.
+```
+
+### 6. Logging & Observability
+
+- Chainlit logs through the standard Python `logging` module. Set `LOG_LEVEL=INFO` (or `DEBUG`) to change verbosity.
 - CrewAI / HrBot logs continue to stream to stdout; `journalctl -u chat-chainlit.service` will capture everything.
-- Admin actions (refresh/cache) include structured success/error messages in the chat history to aid support teams. ### 7. Rollback Plan If anything misbehaves, stop the Chainlit service and start the original Streamlit one: ```bash
+- Admin actions (refresh/cache) include structured success/error messages in the chat history to aid support teams.
+
+### 7. Rollback Plan
+
+If anything misbehaves, stop the Chainlit service and start the original Streamlit one:
+
+```bash
 sudo systemctl stop chat-chainlit.service
 sudo systemctl start chat-streamlit.service
-``` The migration only adds new files and documentation—`src/hr_bot/ui/app.py` remains untouched, so rollback is instant. ### Local setup (quick) Run these commands from your workstation. `uv sync` will create and manage a project-local virtual environment at `.venv` by default — you do not need to create one manually. ```bash
+```
+
+The migration only adds new files and documentation—`src/hr_bot/ui/app.py` remains untouched, so rollback is instant.
+
+### Local setup (quick)
+
+Run these commands from your workstation. `uv sync` will create and manage a project-local virtual environment at `.venv` by default—you do not need to create one manually.
+
+```bash
 # 1) Change to the repository root
-cd /path/to/HR_BOT_V1 # 2) Create and populate the project venv and install dependencies
-uv sync # 3) Install CrewAI CLI/tooling helpers
-crewai install # 4) Run the development UI (or replace with chainlit/production start)
+cd /path/to/HR_BOT_V1
+
+# 2) Create and populate the project venv and install dependencies
+uv sync
+
+# 3) Install CrewAI CLI/tooling helpers
+crewai install
+
+# 4) Run the development UI (or replace with chainlit/production start)
 crewai run
-``` Notes:
+```
+
+Notes:
 - `uv sync` creates `.venv/` and installs pinned dependencies listed in `pyproject.toml`.
 - Use `uv sync --extra legacy` to also install the optional Streamlit UI (rollback only).
-- Do not remove or alter the primary `.env` file unless intentionally reconfiguring runtime secrets. > **Legacy Streamlit UI**: `src/hr_bot/ui/app.py` remains in the repo for rollback but Chainlit is now the supported surface. Use `chainlit run src/hr_bot/ui/chainlit_app.py --host 0.0.0.0 --port 8501` (see the **Chainlit Deployment Guide** section above in this README).
+- Do not remove or alter the primary `.env` file unless intentionally reconfiguring runtime secrets.
+
+> **Legacy Streamlit UI**: `src/hr_bot/ui/app.py` remains in the repo for rollback but Chainlit is now the supported surface. Use `chainlit run src/hr_bot/ui/chainlit_app.py --host 0.0.0.0 --port 8501` (see the **Chainlit Deployment Guide** section above in this README).
 >
-> **LEGACY - Streamlit (rollback only):** The Streamlit UI is preserved for emergency rollback scenarios and is intentionally not required by the default installation. Prefer Chainlit for active development and production deployments. --- ## **What's New in v6.5?** ### **Enhanced Role-Based RAG Filtering** (NEW!)
+> **LEGACY - Streamlit (rollback only):** The Streamlit UI is preserved for emergency rollback scenarios and is intentionally not required by the default installation. Prefer Chainlit for active development and production deployments.
+
+---
+
+## **What's New in v6.5?**
+
+### **Enhanced Role-Based RAG Filtering** (NEW!)
 Stricter document access control at the RAG level:
 - **Role-Aware Retrieval**: HybridRAGTool now filters results based on user role
 - **Access Level Enforcement**: Documents are filtered by `access_level` metadata (all, executive, employee)
