@@ -1,11 +1,21 @@
-# HR Bot v6.5 - Enterprise-Grade AI HR Assistant with S3 Intelligence
+# HR Bot v6.7 - Enterprise-Grade AI HR Assistant with S3 Intelligence
 ## **Production-Ready | Role-Based Access | Smart S3 Caching | Enhanced RAG Filtering** A next-generation HR assistant powered by **CrewAI** and **Amazon Bedrock Nova Lite**, featuring **Role-Based Document Access**, **ETag-Based S3 Smart Caching**, and **Hybrid RAG** with a Chainlit production UI. ## Chainlit Front-End (v6.0) The Streamlit experience is now fully migrated to **Chainlit** for a lighter, more production-ready chat surface: - **Google / Azure AD OAuth** through Chainlit's native providers with the same RBAC checks (`EXECUTIVE_EMAILS`, `EMPLOYEE_EMAILS`).
-- **Header-based dev login** (guarded by `ALLOW_DEV_LOGIN`) for local and automated testing.
-- **Refresh S3 Docs** and **Clear Response Cache** actions reproduced as Chainlit buttons with identical logic.
-- **Warm start caching** reuses the existing HrBot infrastructure; only the UI shell changed.
-- **Documentation-first deployment**: deployment and runtime guidance is included below (merged into this README) along with `.chainlit/config.toml` and `chainlit.md` for quick onboarding.
-## Chainlit Deployment Guide This section captures everything needed to run the Chainlit UI in production with the same behavior, access controls, and maintenance affordances that previously lived inside `src/hr_bot/ui/app.py`. ### 1. Runtime Command Run Chainlit from the project root (`HR_BOT_V1`) so it picks up `.env`, `.chainlit/config.toml`, and the `src/hr_bot/ui/chainlit_app.py` entrypoint: ```bash
-# From the repository root (example path shown relative to repo)
+## **What's New in v6.7?**
+### **Chainlit Message Hardening & Empathetic UI tweaks**
+- Added `_author_as_string` guard so Chainlit messages never serialize complex `cl.User` objects (fixes "author must be a string" errors).
+- Default assistant persona now pulls description/title from environment variables and applies branding consistently between Streamlit fallback and Chainlit UI.
+- Custom CSS plus new mascot/logo assets enlarge the chat header logo (~85%) and ensure avatars remain light in dark mode.
+
+### **Brand Asset Sync Automation**
+- New helper script `scripts/sync_public_assets.py` keeps `public/` assets (logos, avatars) in sync with source files.
+- Systemd service definition now uses absolute paths and sets `CHAINLIT_APP_ROOT` so deployments don’t rely on implicit working directories.
+- `.chainlit/config.toml` references the new public assets and injects `/public/custom.css` for the larger branding treatment.
+
+### **Procedural Action Precision**
+- Expanded `stop_words` in `MasterActionsDatabase.search_actions()` to include `day`, `today`, and `work`, preventing onboarding questions from falsely triggering the "Apply for Half-Day Leave" guide.
+- `pyproject.toml` and `uv.lock` bumped to `6.7` to match this release/tag.
+
+## **What's New in v6.5?**
 cd HR_BOT_V1
 # If you want to activate the project venv manually (uv manages .venv by default):
 . .venv/bin/activate

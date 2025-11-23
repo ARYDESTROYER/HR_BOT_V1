@@ -101,6 +101,24 @@ def _display_name(email: str, fallback: Optional[str]) -> str:
     return email or "Colleague"
 
 
+def _author_as_string(author: Optional[object]) -> str:
+    """Return a JSON-serializable string representation for the author.
+
+    This defends against accidentally passing complex types (like cl.User
+    objects) to Message(author=...) which must be JSON serializable.
+    """
+    if author is None:
+        return APP_NAME
+    # If a Chainlit User object is passed, use display_name or identifier
+    try:
+        if isinstance(author, cl.User):
+            return getattr(author, "display_name", None) or getattr(author, "identifier", str(author))
+    except Exception:
+        # If cl.User is not available or any attribute access fails, fall back
+        pass
+    return str(author)
+
+
 def _history() -> List[Dict[str, str]]:
     return cl.user_session.get("history", [])
 
@@ -302,7 +320,7 @@ async def _send_dashboard(display_name: str, role: str) -> None:
         ),
     ]
     message = cl.Message(
-        author=f"{APP_NAME} Control Center",
+        author=_author_as_string(f"{APP_NAME} Control Center"),
         content=_compose_dashboard(display_name, role),
         actions=actions,
     )
@@ -432,7 +450,7 @@ async def on_chat_start() -> None:
     await _ensure_warm(role, bot)
     await _send_dashboard(display_name, role)
     await cl.Message(
-        author=APP_NAME,
+        author=_author_as_string(APP_NAME),
         content=(
             "I'm online. Ask any HR policy, benefits, or workflow question using the chat input below.\n\n"
             f"_Tip_: {DEFAULT_PLACEHOLDER}"
@@ -450,7 +468,7 @@ async def on_message(message: cl.Message) -> None:
     _set_history(history)
 
     progress = cl.Message(
-        author=APP_NAME,
+        author=_author_as_string(APP_NAME),
         content="Analyzing your request...",
     )
     await progress.send()

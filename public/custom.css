@@ -1,0 +1,25 @@
+/* Custom Chainlit overrides for Inara branding */
+
+/* Increase header logo size (approx 85% larger) */
+img[src*="/logo_full_light"] , img[src*="/logo_light"] {
+  max-height: 72px !important; /* larger header logo */
+  height: auto !important;
+}
+
+/* Increase avatar size for messages (default tailwind h-5 w-5) - 85% larger */
+.h-5.w-5, .avatar.h-5.w-5, img[alt^="Avatar for "] {
+  width: 2.3125rem !important; /* 1.25rem * 1.85 */
+  height: 2.3125rem !important;
+}
+
+/* When avatar has inner image, ensure it fills container */
+.avatar img, img[alt^="Avatar for "] {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+}
+
+/* Slightly increase the 'Welcome back' message header size for better alignment */
+.inara-brand-block h1 {
+  font-size: clamp(2.6rem, 4.4vw, 4.2rem) !important; /* small increase */
+}
