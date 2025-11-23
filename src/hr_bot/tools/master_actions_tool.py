@@ -513,7 +513,7 @@ class MasterActionsDatabase:
             'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'should',
             'could', 'may', 'might', 'can', 'i', 'you', 'me', 'my', 'to', 'for',
             'of', 'in', 'on', 'at', 'from', 'with', 'about', 'by', 'how', 'what',
-            'where', 'when', 'why', 'who', 'which'
+            'where', 'when', 'why', 'who', 'which', 'day', 'today', 'work'
         }
         
         # Remove stop words for better matching

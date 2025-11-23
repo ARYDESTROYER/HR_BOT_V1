@@ -206,8 +206,9 @@ def _get_current_email() -> Optional[str]:
 # CONFIGURATION
 # ============================================================================
 
-PAGE_TITLE = "Inara - HR Assistant"
-PAGE_ICON = None
+PAGE_TITLE = os.getenv("APP_NAME", "Inara")
+# Default chatbot icon (mascot). Use `logo_mascot_light.png` or `logo_mascot_dark.png` depending on theme
+PAGE_ICON = str(ASSETS_DIR / os.getenv("APP_MASCOT_ICON", "logo_mascot_light.png"))
 DATA_DIR = Path("data").resolve()
 DEFAULT_PLACEHOLDER = "Ask me anything about HR policies, benefits, or procedures..."
 SUPPORT_CONTACT_EMAIL = os.getenv("SUPPORT_CONTACT_EMAIL", "support@company.com")
@@ -301,14 +302,13 @@ def render_login_screen() -> None:
     col_brand, col_action = st.columns([1.35, 1])
     with col_brand:
         st.markdown(
-            """
-            <div class="inara-brand-block">
-                <div class="inara-auth-chip">Google Workspace · SSO enforced</div>
-                <h1>Inara HR Assistant</h1>
-                <p>
-                    One secure gateway for policies, benefits, and people workflows. Stay aligned with
-                    executive-only briefings while giving every employee the clarity they need.
-                </p>
+                f"""
+                <div class="inara-brand-block">
+                    <div class="inara-auth-chip">Google Workspace · SSO enforced</div>
+                    <h1>{PAGE_TITLE}</h1>
+                    <p>
+                        {os.getenv('APP_DESCRIPTION', 'your intelligent assistant')}
+                    </p>
                 <ul class="inara-auth-perks">
                     <li>Enterprise-grade access control</li>
                     <li>Executive and employee briefings in one place</li>
@@ -807,7 +807,7 @@ def main() -> None:
 
     render_dashboard_header(user_name, user_role)
     st.caption(
-        "Your intelligent HR companion for policies, benefits, and workplace guidance -- available 24/7"
+        os.getenv("APP_DESCRIPTION", "your intelligent assistant")
     )
     if st.button("Sign out", key="logout_btn"):
         for key in ["dev_email", "logged_in_email", "_pkce_verifier", "_oauth_state", "_auth_pending"]:

@@ -20,9 +20,11 @@ default_theme = "dark"
 layout = "wide"
 alert_style = "modern"
 # Serve logos from the public directory (prefer absolute path for clarity)
-logo_file_url = "/public/logo_light.png"
+# Use the full-size light logo for the header to make it visually larger.
+logo_file_url = "/public/logo_full_light.png"
 # Default avatar file endpoint (front-end uses this or falls back to /avatars/{name})
 default_avatar_file_url = "/avatars/inara"
+custom_css = "/public/custom.css"
 
 [meta]
 generated_by = "chainlit-setup"
