@@ -17,6 +17,7 @@ allow_thread_sharing = false
 name = "Inara"
 description = "your intelligent assistant"
 default_theme = "dark"
+default_language = "en-US"
 layout = "wide"
 alert_style = "modern"
 # Serve logos from the public directory (prefer absolute path for clarity)
