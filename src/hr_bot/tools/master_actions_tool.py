@@ -1,570 +1,486 @@
 """
-Master Actions Tool - Procedural Actions with Links & Steps
+Master Actions Tool - Hybrid RAG for Procedural Actions
 Handles queries about HOW TO perform actions in HR systems (DarwinBox, SumTotal, etc.)
-Dynamically loads action guides from Master Document in S3
+Dynamically loads and indexes Master Document from S3 using same RAG approach as HybridRAGTool
 """
-from typing import List, Dict, Any, Optional
-from dataclasses import dataclass, field
+import os
+import pickle
+import hashlib
+import re
+from pathlib import Path
+from typing import List, Optional
+from dataclasses import dataclass
+
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain_community.retrievers import BM25Retriever
+from langchain.retrievers import EnsembleRetriever
+from langchain.schema import Document
+from langchain_community.document_loaders import Docx2txtLoader
+from rank_bm25 import BM25Okapi
+from diskcache import Cache
+
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
-from pathlib import Path
-import re
-import tempfile
-from langchain_community.document_loaders import Docx2txtLoader
 
 
 @dataclass
-class ActionGuide:
-    """Structured action with link, steps, and provenance"""
-    action_name: str
-    link: Optional[str]
-    steps: List[str]
-    keywords: List[str]  # For matching queries
-    source: str = field(default="Master Actions Guide")
+class ActionSearchResult:
+    """Search result with metadata for action queries"""
+    content: str
+    source: str
+    score: float
+    chunk_id: int
 
 
-class MasterActionsDatabase:
-    """Loads structured procedural actions from Master Document"""
+class MasterActionsRetriever:
+    """
+    Hybrid retriever for Master Actions Document using BM25 + Vector search
+    Same architecture as HybridRAGRetriever but focused on procedural/action content
+    """
     
-    def __init__(self, cache_dir: Optional[str] = None):
+    # Confidence threshold for action search results (0.0 - 1.0)
+    # Results below this score are considered low-confidence and filtered out
+    CONFIDENCE_THRESHOLD: float = float(os.getenv("MASTER_ACTIONS_CONFIDENCE_THRESHOLD", "0.3"))
+    
+    def __init__(
+        self,
+        cache_dir: Optional[str] = None,
+        document_paths: Optional[List[str]] = None,
+        s3_version_hash: Optional[str] = None
+    ):
         """
-        Initialize database by loading from Master Document
+        Initialize Master Actions Retriever
         
         Args:
-            cache_dir: Directory containing cached S3 documents (e.g., /tmp/hr_bot_s3_cache/employee/)
+            cache_dir: Directory containing cached S3 documents
+            document_paths: Optional list of document file paths (for S3 documents)
+            s3_version_hash: Optional S3 ETag-based version hash for cache invalidation
         """
-        self.actions: List[ActionGuide] = []
-        self._load_from_master_document(cache_dir)
+        # Use same embeddings as HybridRAGTool for consistency
+        self.embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_kwargs={'device': 'cpu', 'trust_remote_code': False},
+            encode_kwargs={'normalize_embeddings': True}
+        )
         
-        # Fallback: If master doc not found or parsing failed, use minimal hardcoded defaults
-        if not self.actions:
-            print("⚠️  Master Document not found or empty - using fallback actions")
-            self._load_fallback_actions()
+        # Core indices
+        self.vector_store = None
+        self.bm25 = None
+        self.bm25_retriever = None
+        self.faiss_retriever = None
+        self.ensemble_retriever = None
+        self.documents: List[Document] = []
+        
+        # Configuration
+        self.cache_dir = cache_dir
+        self.document_paths = document_paths
+        self.s3_version_hash = s3_version_hash
+        
+        # Index storage
+        self.index_dir = Path.home() / ".master_actions_index"
+        self.index_dir.mkdir(exist_ok=True)
+        self.index_hash: Optional[str] = None
+        
+        # Cache for search results
+        self._search_cache = Cache(str(self.index_dir / "search_cache"))
+        
+        # Search settings (tuned for action/procedural content)
+        self.chunk_size = 600  # Smaller chunks for action steps
+        self.chunk_overlap = 150
+        self.top_k = 5
+        self.bm25_weight = 0.6  # Higher BM25 weight for keyword matching (action names)
+        self.vector_weight = 0.4
+        
+        self._last_sources: List[str] = []
     
-    def _load_from_master_document(self, cache_dir: Optional[str] = None):
+    def _find_master_document(self) -> Optional[Path]:
         """
-        Parse Master Document (Knowledge Bot – Action Links and Steps.docx) from S3 cache
+        Find Master Document in cache directory or document paths
+        Looks for files with 'knowledge', 'action', 'master', 'guide' in name
+        """
+        search_paths = []
         
-        Expected format in document:
-        Action Name: Apply Leave
-        Link: https://darwinbox.com/...
-        Steps:
-        1. Click on the mentioned link
-        2. Select 'Apply Leave'
-        ...
-        Keywords: apply leave, request leave, ...
-        """
+        # Check cache_dir first (S3 mode)
+        if self.cache_dir:
+            cache_path = Path(self.cache_dir)
+            if cache_path.exists():
+                search_paths.append(cache_path)
+        
+        # Check document_paths if provided
+        if self.document_paths:
+            for doc_path in self.document_paths:
+                p = Path(doc_path)
+                if p.exists() and any(kw in p.name.lower() for kw in ['knowledge', 'action', 'master', 'guide']):
+                    return p
+        
+        # Search in cache directories
+        for base_path in search_paths:
+            # Try exact name first
+            exact_path = base_path / "Knowledge Bot – Action Links and Steps.docx"
+            if exact_path.exists():
+                return exact_path
+            
+            # Search for variations
+            for file in base_path.glob("*.docx"):
+                if any(kw in file.name.lower() for kw in ['knowledge', 'action', 'master', 'guide']):
+                    return file
+        
+        # Fallback: check local data directory
         try:
-            # Find Master Document in cache
-            master_doc_path = self._find_master_document(cache_dir)
-            if not master_doc_path:
-                print("❌ Master Document not found in cache")
-                return
-            
-            print(f"📖 Loading Master Document from: {master_doc_path}")
-            
-            # Load document content
-            loader = Docx2txtLoader(str(master_doc_path))
-            docs = loader.load()
-            
-            if not docs:
-                print("❌ Master Document is empty")
-                return
-            
-            content = docs[0].page_content
-            source_name = master_doc_path.name
-            
-            # Parse actions using structured patterns
-            self.actions = self._parse_actions(content, source_name)
-            print(f"✅ Loaded {len(self.actions)} actions from Master Document")
-            
-        except Exception as e:
-            print(f"❌ Error loading Master Document: {e}")
-    
-    def _find_master_document(self, cache_dir: Optional[str] = None) -> Optional[Path]:
-        """Find Master Document in S3 cache directory"""
-        if cache_dir:
-            base_path = Path(cache_dir)
-        else:
-            # Search temp directory
-            temp_base = Path(tempfile.gettempdir()) / "hr_bot_s3_cache"
-            # Check both employee and executive folders
-            for role in ["employee", "executive"]:
-                role_path = temp_base / role
-                if role_path.exists():
-                    base_path = role_path
-                    break
-            else:
-                return None
-        
-        # Look for Master Document file
-        # Try exact name first
-        exact_path = base_path / "Knowledge Bot – Action Links and Steps.docx"
-        if exact_path.exists():
-            return exact_path
-        
-        # Search for any file with "knowledge" or "action" in name
-        for file in base_path.glob("*"):
-            if file.is_file() and any(keyword in file.name.lower() for keyword in ["knowledge", "action", "master", "guide"]):
-                return file
+            current_file = Path(__file__).resolve()
+            project_root = current_file.parent.parent.parent.parent
+            local_master = project_root / "data" / "Master-Document"
+            if local_master.exists():
+                for file in local_master.glob("*.docx"):
+                    if any(kw in file.name.lower() for kw in ['knowledge', 'action', 'master', 'guide']):
+                        return file
+        except Exception:
+            pass
         
         return None
     
-    def _parse_actions(self, content: str, source_name: str = "Master Actions Guide") -> List[ActionGuide]:
-        """
-        Parse Master Document content into ActionGuide objects
+    def _compute_version_hash(self) -> str:
+        """Compute hash for cache invalidation"""
+        hasher = hashlib.md5()
         
-        Format:
-        Action Name: <name>
-        Link: <url>
-        Steps:
-        1. <step>
-        2. <step>
-        Keywords: <keyword1>, <keyword2>, ...
-        """
-        actions = []
+        # Use S3 version hash if available
+        if self.s3_version_hash:
+            hasher.update(self.s3_version_hash.encode())
+        elif self.document_paths:
+            for doc_path in sorted(self.document_paths):
+                hasher.update(doc_path.encode())
+                try:
+                    mtime = Path(doc_path).stat().st_mtime
+                    hasher.update(str(mtime).encode())
+                except Exception:
+                    pass
         
-        # Split by action blocks (look for "Action Name:" pattern)
-        blocks = re.split(r'(?=Action Name:)', content, flags=re.IGNORECASE)
+        # Include config in hash
+        hasher.update(f"chunk:{self.chunk_size}|overlap:{self.chunk_overlap}".encode())
+        hasher.update(b"master_actions_v2")
         
-        for block in blocks:
-            if not block.strip():
-                continue
-            
-            # Extract action name
-            name_match = re.search(r'Action Name:\s*(.+?)(?:\n|$)', block, re.IGNORECASE)
-            if not name_match:
-                continue
-            action_name = name_match.group(1).strip()
-            
-            # Extract link
-            link_match = re.search(r'Link:\s*(.+?)(?:\n|$)', block, re.IGNORECASE)
-            link = link_match.group(1).strip() if link_match else ""
-            if link:
-                normalized_link = link.lower()
-                if normalized_link in {"n/a", "na", "none", "null"}:
-                    link = ""
-            if link and not re.match(r"https?://", link):
-                # Treat non-URL values as navigation hints rather than hyperlinks
-                link = link.strip()
-            
-            # Extract steps (numbered list)
-            steps = []
-            step_pattern = r'(?:Steps?:|^\s*\d+\.)\s*(.+?)(?=\n\s*\d+\.|\n[A-Z]|$)'
-            for match in re.finditer(step_pattern, block, re.MULTILINE | re.DOTALL):
-                step_text = match.group(1).strip()
-                if step_text and not step_text.startswith("Action Name") and not step_text.startswith("Link") and not step_text.startswith("Keywords"):
-                    # Clean numbered prefix if present
-                    step_text = re.sub(r'^\d+\.\s*', '', step_text).strip()
-                    if step_text:
-                        steps.append(step_text)
-            
-            # Extract keywords
-            keywords = []
-            keywords_match = re.search(r'Keywords?:\s*(.+?)(?:\n\n|$)', block, re.IGNORECASE | re.DOTALL)
-            if keywords_match:
-                keywords_text = keywords_match.group(1).strip()
-                # Split by comma and clean
-                keywords = [kw.strip().lower() for kw in keywords_text.split(',') if kw.strip()]
-            
-            # If no explicit keywords, derive from action name
-            if not keywords:
-                keywords = [word.lower() for word in action_name.split() if len(word) > 2]
-            
-            # Create ActionGuide if we have minimum required data
-            if action_name and (link or steps):
-                actions.append(ActionGuide(
-                    action_name=action_name,
-                    link=link or None,
-                    steps=steps if steps else ["Please refer to the provided link for detailed steps."],
-                    keywords=keywords,
-                    source=source_name
-                ))
-        
-        return actions
+        return hasher.hexdigest()
     
-    def _load_fallback_actions(self):
-        """Load minimal fallback actions if Master Document parsing fails"""
-        self.actions = [
-            # Leave Queries
-            ActionGuide(
-                action_name="Find Leave Policy Document",
-                link="https://sap.demo-company.com/home/policies",
-                steps=[
-                    "Login to SAP Portal",
-                    "Go to Home Page",
-                    "Scroll to the end of the page",
-                    "Click on 'Policies' section",
-                    "Open 'Leave Policy' document"
-                ],
-                keywords=[
-                    "leave policy", "policy document", "find policy", "leave rules",
-                    "policy", "leave guidelines", "leave documentation"
-                ],
-                source="Master Actions Fallback"
-            ),
-            ActionGuide(
-                action_name="Check Remaining Leaves",
-                link="https://ascent.demo-company.com/leave-management/balance",
-                steps=[
-                    "Login to Ascent Portal",
-                    "Go to 'Leave Management' Module",
-                    "Select 'Leave Application'",
-                    "Click on 'Leave Balance'",
-                    "View Remaining Leave Details"
-                ],
-                keywords=[
-                    "check leaves", "remaining leaves", "leave balance", "leave quota",
-                    "how much leave", "available leave", "leave entitlement", "days left"
-                ],
-                source="Master Actions Fallback"
-            ),
-            ActionGuide(
-                action_name="Apply for Leave",
-                link="https://ascent.demo-company.com/leave-management/apply",
-                steps=[
-                    "Login to Ascent Portal",
-                    "Go to 'Leave Management' Module",
-                    "Select 'Leave Application'",
-                    "Click on 'New Request'"
-                ],
-                keywords=[
-                    "apply leave", "request leave", "take leave", "book leave",
-                    "submit leave", "leave application", "new leave", "leave request"
-                ],
-                source="Master Actions Fallback"
-            ),
-            ActionGuide(
-                action_name="Apply for Half-Day Leave",
-                link="https://ascent.demo-company.com/leave-management/apply",
-                steps=[
-                    "Login to Ascent Portal",
-                    "Go to 'Leave Management' Module",
-                    "Select 'Leave Application'",
-                    "Click on 'New Request'"
-                ],
-                keywords=[
-                    "half day", "half-day", "partial leave", "half day leave",
-                    "apply half day", "request half day"
-                ],
-                source="Master Actions Fallback"
-            ),
-            # Timesheet Queries
-            ActionGuide(
-                action_name="Raise OD/Attendance Regularisation",
-                link="https://ascent.demo-company.com/attendance/od-application",
-                steps=[
-                    "Login to Ascent Portal",
-                    "Go to Attendance",
-                    "Select 'OD Application'"
-                ],
-                keywords=[
-                    "od", "attendance regularisation", "regularization", "raise od",
-                    "od application", "outdoor duty", "attendance correction"
-                ],
-                source="Master Actions Fallback"
-            ),
-            ActionGuide(
-                action_name="Regularise Attendance for Missing Punches",
-                link="https://ascent.demo-company.com/attendance/regularisation",
-                steps=[
-                    "Login to Ascent Portal",
-                    "Go to Attendance",
-                    "Select 'My Attendance Regularisation'"
-                ],
-                keywords=[
-                    "missing punch", "regularise attendance", "attendance regularisation",
-                    "forgot punch", "punch correction", "attendance correction", "regularize"
-                ],
-                source="Master Actions Fallback"
-            ),
-            ActionGuide(
-                action_name="Update Timesheet",
-                link="https://ascent.demo-company.com/timesheet",
-                steps=[
-                    "Login to Ascent Portal",
-                    "Go to 'Timesheet' tab",
-                    "Select 'Missing Timesheet'",
-                    "Add Task",
-                    "Submit"
-                ],
-                keywords=[
-                    "timesheet", "update timesheet", "fill timesheet", "submit timesheet",
-                    "missing timesheet", "add task", "timesheet entry"
-                ],
-                source="Master Actions Fallback"
-            ),
-            # Generic Queries
-            ActionGuide(
-                action_name="View Holiday Calendar",
-                link="https://sap.demo-company.com/home/holiday-calendar",
-                steps=[
-                    "Login to SAP Portal",
-                    "Go to Home Page",
-                    "Scroll to the end of the page",
-                    "Click on 'Holiday Calendar'"
-                ],
-                keywords=[
-                    "holiday calendar", "holidays", "public holidays", "company holidays",
-                    "view holidays", "holiday list", "calendar", "holiday"
-                ],
-                source="Master Actions Fallback"
-            ),
-            ActionGuide(
-                action_name="Access HR Policies of the Organization",
-                link="https://sap.demo-company.com/home/policies",
-                steps=[
-                    "Login to SAP Portal",
-                    "Go to Home Page",
-                    "Scroll to the end of the page",
-                    "Click on 'Policies'"
-                ],
-                keywords=[
-                    "hr policies", "policies", "company policies", "organization policies",
-                    "access policies", "policy documents", "hr rules"
-                ],
-                source="Master Actions Fallback"
-            ),
-            ActionGuide(
-                action_name="Find Learning Assignments",
-                link="https://sap.demo-company.com/home/learning",
-                steps=[
-                    "Login to SAP Portal",
-                    "Click on Home Dropdown",
-                    "Click on 'Learning'"
-                ],
-                keywords=[
-                    "learning", "learning assignments", "training", "courses",
-                    "find learning", "my learning", "assignments"
-                ],
-                source="Master Actions Fallback"
-            ),
-            ActionGuide(
-                action_name="Refer for Any Position",
-                link="https://sap.demo-company.com/careers/referral",
-                steps=[
-                    "Login to SAP Portal",
-                    "Click on 'Careers'",
-                    "Go to 'Referral Tracking'",
-                    "Add Referral & Submit"
-                ],
-                keywords=[
-                    "referral", "refer", "refer position", "employee referral",
-                    "referral tracking", "add referral", "job referral"
-                ],
-                source="Master Actions Fallback"
-            ),
-            ActionGuide(
-                action_name="Raise Resignation in the Tool",
-                link="https://sap.demo-company.com/profile/separation",
-                steps=[
-                    "Login to SAP Portal",
-                    "Go to 'View My Profile'",
-                    "Select 'Actions'",
-                    "Click on 'Separation'"
-                ],
-                keywords=[
-                    "resignation", "resign", "quit", "separation", "raise resignation",
-                    "submit resignation", "leave company"
-                ],
-                source="Master Actions Fallback"
-            ),
-            # Payroll Queries
-            ActionGuide(
-                action_name="Access Payslips",
-                link="https://ascent.demo-company.com/payroll/payslips",
-                steps=[
-                    "Login to Ascent Portal",
-                    "Click on Menu",
-                    "Select 'Payslips'"
-                ],
-                keywords=[
-                    "payslip", "payslips", "salary slip", "access payslip",
-                    "download payslip", "view payslip", "pay statement"
-                ],
-                source="Master Actions Fallback"
-            ),
-            ActionGuide(
-                action_name="Declare Flexi Basket Components",
-                link="https://ascent.demo-company.com/payroll/flexi-basket",
-                steps=[
-                    "Login to Ascent Portal",
-                    "Click on Menu",
-                    "Select 'Flexi Basket Declaration'"
-                ],
-                keywords=[
-                    "flexi basket", "declare flexi", "flexi components", "flexi declaration",
-                    "basket declaration", "salary components"
-                ],
-                source="Master Actions Fallback"
-            ),
-            ActionGuide(
-                action_name="Submit Flexi Basket Bills",
-                link="https://ascent.demo-company.com/payroll/manage-claims",
-                steps=[
-                    "Login to Ascent Portal",
-                    "Click on Menu",
-                    "Select 'Manage Claims'",
-                    "Click 'New Request'"
-                ],
-                keywords=[
-                    "flexi bills", "submit bills", "flexi basket bills", "claims",
-                    "manage claims", "bill submission", "reimbursement",
-                    "expense claim", "claim expenses", "travel claim", "lunch claim",
-                    "meal claim", "client lunch", "client meal", "expense reimbursement",
-                    "travel expenses", "claim travel", "expense", "expenses",
-                    "claim reimbursement", "submit claim", "submit expense"
-                ],
-                source="Master Actions Fallback"
-            ),
-            ActionGuide(
-                action_name="Update Bank Account for Salary Credit",
-                link="https://ascent.demo-company.com/profile/personal-details",
-                steps=[
-                    "Login to Ascent Portal",
-                    "Click on Menu",
-                    "Select 'Personal Details'"
-                ],
-                keywords=[
-                    "bank account", "update bank", "salary credit", "bank details",
-                    "change bank", "account details", "salary account"
-                ],
-                source="Master Actions Fallback"
-            ),
-            ActionGuide(
-                action_name="Declare Income Tax and View Tax Calculator",
-                link="https://ascent.demo-company.com/payroll/tax-declaration",
-                steps=[
-                    "Login to Ascent Portal",
-                    "Go to Main Menu",
-                    "Select 'Investment Declaration/Income Tax Calculator'"
-                ],
-                keywords=[
-                    "income tax", "tax declaration", "tax calculator", "declare tax",
-                    "investment declaration", "tax", "it declaration"
-                ],
-                source="Master Actions Fallback"
-            ),
-            ActionGuide(
-                action_name="View or Download Form-16",
-                link="https://ascent.demo-company.com/payroll/form16",
-                steps=[
-                    "Login to Ascent Portal",
-                    "Go to Main Menu",
-                    "Click on 'Form-16'"
-                ],
-                keywords=[
-                    "form 16", "form-16", "form16", "tax form", "download form 16",
-                    "view form 16", "tax certificate"
-                ],
-                source="Master Actions Fallback"
-            ),
-            # PMS Queries
-            ActionGuide(
-                action_name="Update Goals",
-                link="https://sap.demo-company.com/performance/goals",
-                steps=[
-                    "Login to SAP Portal",
-                    "Go to Home Page",
-                    "Under 'For You Today' click on 'Goal Setting by Employee' or go to Home Dropdown → Performance Inbox"
-                ],
-                keywords=[
-                    "goals", "update goals", "goal setting", "set goals",
-                    "performance goals", "objectives", "kpi"
-                ],
-                source="Master Actions Fallback"
-            ),
-            ActionGuide(
-                action_name="Access Probation Dashboard",
-                link="https://sap.demo-company.com/performance/probation",
-                steps=[
-                    "Login to SAP Portal",
-                    "Go to Home Page",
-                    "Under 'For You Today' click on 'Probation Icon' or go to Home Dropdown → Performance → Inbox"
-                ],
-                keywords=[
-                    "probation", "probation dashboard", "probation review",
-                    "access probation", "probation status"
-                ],
-                source="Master Actions Fallback"
-            )
-        ]
-    
-    def search_actions(self, query: str) -> List[ActionGuide]:
-        """
-        Search for relevant actions based on query keywords with intelligent relevance filtering
-        Uses semantic keyword matching with multi-word phrase detection
-        """
-        query_lower = query.lower().strip()
-        # Treat pure policy questions (no action verbs) as non-procedural
-        if "policy" in query_lower:
-            procedural_markers = {
-                "how", "apply", "download", "update", "enroll", "enrol",
-                "submit", "request", "file", "check", "view", "access",
-                "complete", "fill", "log"
-            }
-            if not any(marker in query_lower for marker in procedural_markers):
-                return []
-        query_tokens = set(re.findall(r'\b\w+\b', query_lower))
+    def _load_master_document(self) -> List[Document]:
+        """Load Master Document and return as Document objects"""
+        documents = []
         
-        # Common stop words that shouldn't contribute to matching
-        stop_words = {
-            'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-            'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'should',
-            'could', 'may', 'might', 'can', 'i', 'you', 'me', 'my', 'to', 'for',
-            'of', 'in', 'on', 'at', 'from', 'with', 'about', 'by', 'how', 'what',
-            'where', 'when', 'why', 'who', 'which', 'day', 'today', 'work'
+        master_path = self._find_master_document()
+        if not master_path:
+            print("❌ Master Document not found in cache")
+            return documents
+        
+        print(f"📖 Loading Master Document: {master_path.name}")
+        
+        try:
+            loader = Docx2txtLoader(str(master_path))
+            docs = loader.load()
+            
+            for doc in docs:
+                doc.metadata['source'] = master_path.name
+                doc.metadata['file_path'] = str(master_path)
+                doc.metadata['type'] = 'master_actions'
+                
+                # Clean content
+                doc.page_content = self._sanitize_content(doc.page_content)
+                documents.append(doc)
+            
+            print(f"✅ Loaded Master Document: {master_path.name}")
+            
+        except Exception as e:
+            print(f"❌ Error loading Master Document: {e}")
+        
+        return documents
+    
+    def _sanitize_content(self, text: str) -> str:
+        """Clean placeholder tokens and normalize text"""
+        if not text:
+            return text
+        
+        # Common placeholder replacements
+        replacements = {
+            r"\[insert name and job title\]": "HR Representative",
+            r"\[insert job title\]": "HR Representative",
+            r"\[the Company\]": "the company",
+            r"\[Company Name\]": "the company",
+            r"\[Employee\]": "employee",
+            r"\[INSERT LOGO HERE\]": "",
         }
         
-        # Remove stop words for better matching
-        meaningful_tokens = query_tokens - stop_words
+        for pattern, replacement in replacements.items():
+            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
         
-        # If no meaningful tokens remain, return empty (too vague)
-        if not meaningful_tokens:
+        # Generic placeholder cleanup
+        text = re.sub(r"\[\s*insert[^\]]*\]", "the appropriate details", text, flags=re.IGNORECASE)
+        
+        return text
+    
+    def _chunk_documents(self, documents: List[Document]) -> List[Document]:
+        """Chunk documents with action-aware splitting"""
+        # Use separators that preserve action blocks
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=self.chunk_size,
+            chunk_overlap=self.chunk_overlap,
+            separators=["\n\n\n", "\n\n", "Action Name:", "\n", ". ", " "],
+            length_function=len,
+        )
+        
+        chunks = text_splitter.split_documents(documents)
+        
+        # Add chunk IDs
+        for idx, chunk in enumerate(chunks):
+            chunk.metadata['chunk_id'] = idx
+        
+        return chunks
+    
+    def _save_index(self, vector_path: Path, bm25_path: Path):
+        """Save indexes to disk"""
+        try:
+            if self.vector_store:
+                self.vector_store.save_local(str(vector_path))
+            
+            if self.bm25:
+                # Clean documents before saving (remove non-picklable objects)
+                clean_docs = []
+                for doc in self.documents:
+                    clean_doc = Document(
+                        page_content=doc.page_content,
+                        metadata=doc.metadata.copy()
+                    )
+                    clean_docs.append(clean_doc)
+                
+                with open(bm25_path, 'wb') as f:
+                    pickle.dump({
+                        'bm25': self.bm25,
+                        'documents': clean_docs,
+                        'index_hash': self.index_hash
+                    }, f)
+            
+            print("✓ Master Actions index saved")
+        except Exception as e:
+            print(f"⚠️  Could not save Master Actions index: {e}")
+    
+    def _load_index(self, vector_path: Path, bm25_path: Path, current_hash: str) -> bool:
+        """Load indexes from disk if valid"""
+        try:
+            if not vector_path.exists() or not bm25_path.exists():
+                return False
+            
+            # Check TTL (24 hours)
+            import time
+            index_age_hours = (time.time() - bm25_path.stat().st_mtime) / 3600
+            if index_age_hours > 24:
+                print(f"⏰ Master Actions index is {index_age_hours:.1f}h old - rebuilding...")
+                return False
+            
+            # Load and validate hash
+            with open(bm25_path, 'rb') as f:
+                data = pickle.load(f)
+            
+            if data.get('index_hash') != current_hash:
+                print(f"🔄 Master Actions index hash mismatch - rebuilding...")
+                return False
+            
+            # Load FAISS
+            self.vector_store = FAISS.load_local(
+                str(vector_path),
+                self.embeddings,
+                allow_dangerous_deserialization=True
+            )
+            
+            # Load BM25 data
+            self.bm25 = data['bm25']
+            self.documents = data['documents']
+            self.index_hash = data['index_hash']
+            
+            # Rebuild retrievers
+            self._build_retrievers()
+            
+            print("✓ Loaded Master Actions index from disk")
+            return True
+            
+        except Exception as e:
+            print(f"Could not load Master Actions index: {e}")
+            return False
+    
+    def _build_retrievers(self):
+        """Build BM25 and FAISS retrievers after loading documents"""
+        if not self.documents:
+            return
+        
+        base_k = max(self.top_k, 5)
+        
+        self.faiss_retriever = self.vector_store.as_retriever(
+            search_kwargs={"k": base_k * 2}
+        )
+        
+        self.bm25_retriever = BM25Retriever.from_documents(self.documents)
+        self.bm25_retriever.k = base_k * 2
+        
+        self.ensemble_retriever = EnsembleRetriever(
+            retrievers=[self.bm25_retriever, self.faiss_retriever],
+            weights=[self.bm25_weight, self.vector_weight],
+        )
+    
+    def build_index(self, force_rebuild: bool = False):
+        """Build or load hybrid search index for Master Document"""
+        current_hash = self._compute_version_hash()
+        
+        vector_path = self.index_dir / "master_faiss_index"
+        bm25_path = self.index_dir / "master_bm25_index.pkl"
+        
+        # Force rebuild if requested
+        if force_rebuild:
+            print("🔥 Force rebuild Master Actions index")
+            import shutil
+            if vector_path.exists():
+                shutil.rmtree(vector_path)
+            if bm25_path.exists():
+                bm25_path.unlink()
+        else:
+            # Try to load existing index
+            if self._load_index(vector_path, bm25_path, current_hash):
+                return
+        
+        print("🔨 Building Master Actions index...")
+        
+        # Load and chunk Master Document
+        raw_docs = self._load_master_document()
+        if not raw_docs:
+            print("⚠️  No Master Document found - tool will return NO_ACTION_FOUND")
+            return
+        
+        self.documents = self._chunk_documents(raw_docs)
+        print(f"📊 Created {len(self.documents)} chunks from Master Document")
+        
+        if not self.documents:
+            return
+        
+        # Build FAISS vector store
+        texts = [doc.page_content for doc in self.documents]
+        metadatas = [doc.metadata for doc in self.documents]
+        
+        self.vector_store = FAISS.from_texts(
+            texts=texts,
+            embedding=self.embeddings,
+            metadatas=metadatas
+        )
+        
+        # Build BM25 index
+        tokenized_corpus = [doc.page_content.lower().split() for doc in self.documents]
+        self.bm25 = BM25Okapi(tokenized_corpus)
+        
+        # Build retrievers
+        self._build_retrievers()
+        
+        self.index_hash = current_hash
+        print(f"✅ Master Actions index built with {len(self.documents)} chunks")
+        
+        # Save index
+        self._save_index(vector_path, bm25_path)
+    
+    def _expand_query(self, query: str) -> str:
+        """Expand query with action-related synonyms for better recall"""
+        q = query.strip().lower()
+        expansions = []
+        
+        # Common action synonyms
+        action_expansions = {
+            'apply': ['request', 'submit', 'file'],
+            'download': ['get', 'access', 'view', 'fetch'],
+            'leave': ['vacation', 'time off', 'absence', 'pto'],
+            'payslip': ['salary slip', 'pay stub', 'salary statement'],
+            'profile': ['personal details', 'employee info', 'my details'],
+            'training': ['learning', 'course', 'certification', 'skill'],
+            'expense': ['reimbursement', 'claim', 'travel claim'],
+            'attendance': ['punch', 'check in', 'clock'],
+            'holiday': ['calendar', 'public holiday', 'company holiday'],
+            'form-16': ['tax form', 'income tax', 'tds'],
+            'balance': ['remaining', 'available', 'quota'],
+        }
+        
+        for keyword, synonyms in action_expansions.items():
+            if keyword in q:
+                expansions.extend(synonyms)
+        
+        if expansions:
+            return f"{query} {' '.join(set(expansions))}"
+        return query
+    
+    def search(self, query: str, top_k: Optional[int] = None) -> List[ActionSearchResult]:
+        """
+        Perform hybrid search for action-related content
+        
+        Args:
+            query: User's query about HOW TO perform an action
+            top_k: Number of results to return
+            
+        Returns:
+            List of ActionSearchResult objects
+        """
+        if not self.vector_store or not self.ensemble_retriever or not self.documents:
+            print("⚠️  Master Actions index not built - no results")
             return []
         
-        matches = []
-        for action in self.actions:
-            # Calculate match score based on keyword overlap
-            score = 0
-            matched_keywords = []
+        top_k = top_k or self.top_k
+        
+        # Expand query for better recall
+        expanded_query = self._expand_query(query)
+        
+        # Check cache
+        cache_key = f"master_search:{self.index_hash}:{expanded_query}:{top_k}"
+        cached = self._search_cache.get(cache_key)
+        if cached:
+            return cached
+        
+        # Perform hybrid search
+        try:
+            raw_docs = self.ensemble_retriever.invoke(expanded_query)
+            docs = list(raw_docs) if raw_docs else []
+        except Exception as e:
+            print(f"⚠️  Search error: {e}")
+            return []
+        
+        if not docs:
+            return []
+        
+        # Score and rank results
+        query_tokens = set(re.findall(r'\b\w+\b', query.lower()))
+        stop_words = {'a', 'an', 'the', 'is', 'are', 'to', 'for', 'of', 'in', 'on', 'how', 'what', 'i', 'my', 'can'}
+        query_tokens -= stop_words
+        
+        results = []
+        for rank, doc in enumerate(docs):
+            base_score = 1.0 / (rank + 1)
             
-            for keyword in action.keywords:
-                keyword_tokens = set(re.findall(r'\b\w+\b', keyword.lower())) - stop_words
-                
-                # Check for multi-word phrase match (higher weight)
-                if keyword in query_lower:
-                    score += len(keyword.split()) * 3  # 3 points per word in exact phrase
-                    matched_keywords.append(keyword)
-                else:
-                    # Token overlap (lower weight)
-                    overlap = len(meaningful_tokens & keyword_tokens)
-                    if overlap > 0:
-                        # Calculate relevance ratio: overlap / keyword_length
-                        relevance_ratio = overlap / max(len(keyword_tokens), 1)
-                        # Only count if at least 50% of keyword tokens match
-                        if relevance_ratio >= 0.5:
-                            score += overlap
-                            matched_keywords.append(keyword)
+            # Boost for keyword matches
+            content_lower = doc.page_content.lower()
+            keyword_hits = sum(1 for token in query_tokens if token in content_lower)
+            keyword_boost = 0.1 * keyword_hits
             
-            # Apply minimum threshold: require at least one meaningful match
-            if score > 0 and matched_keywords:
-                matches.append((score, action, matched_keywords))
+            # Boost for action-related keywords in content
+            action_markers = ['link:', 'steps:', 'step 1', 'step 2', 'click', 'navigate', 'select', 'action name:']
+            action_boost = 0.2 if any(marker in content_lower for marker in action_markers) else 0
+            
+            score = base_score + keyword_boost + action_boost
+            
+            results.append(ActionSearchResult(
+                content=doc.page_content,
+                source=doc.metadata.get('source', 'Master Actions Guide'),
+                score=score,
+                chunk_id=doc.metadata.get('chunk_id', -1)
+            ))
         
-        # Sort by score (descending)
-        matches.sort(key=lambda x: x[0], reverse=True)
+        # Sort by score and limit
+        results.sort(key=lambda r: r.score, reverse=True)
+        results = results[:top_k]
         
-        # Apply intelligent filtering: remove low-confidence matches
-        if matches:
-            best_score = matches[0][0]
-            # Only return matches within 40% of best score AND with at least 50% keyword relevance
-            filtered_matches = [
-                action for score, action, keywords in matches 
-                if score >= best_score * 0.4 and score >= 2  # Require minimum score of 2 for relevance
-            ]
-            return filtered_matches
+        # Cache results
+        self._search_cache.set(cache_key, results, expire=3600)
         
-        return []
+        return results
 
 
 class MasterActionsToolInput(BaseModel):
@@ -577,7 +493,10 @@ class MasterActionsToolInput(BaseModel):
 
 class MasterActionsTool(BaseTool):
     """
-    Master Actions Tool - Provides step-by-step procedural guidance with links
+    Master Actions Tool - Hybrid RAG for Procedural Actions
+    
+    Dynamically loads Master Document from S3 and uses same RAG approach
+    as HybridRAGTool for sustainable, maintainable action search.
     
     Use this tool when users ask HOW TO perform specific actions like:
     - Applying for leave
@@ -585,8 +504,6 @@ class MasterActionsTool(BaseTool):
     - Updating personal details
     - Enrolling in training
     - Checking leave balance
-    
-    This tool returns direct links and step-by-step instructions.
     """
     
     name: str = "master_actions_guide"
@@ -602,67 +519,84 @@ class MasterActionsTool(BaseTool):
     )
     args_schema: type[BaseModel] = MasterActionsToolInput
     
-    database: MasterActionsDatabase = Field(default=None, exclude=True)
+    retriever: MasterActionsRetriever = Field(default=None, exclude=True)
     
-    def __init__(self, cache_dir: Optional[str] = None, **kwargs):
+    def __init__(
+        self,
+        cache_dir: Optional[str] = None,
+        document_paths: Optional[List[str]] = None,
+        s3_version_hash: Optional[str] = None,
+        force_rebuild: bool = False,
+        **kwargs
+    ):
         """
-        Initialize MasterActionsTool with optional cache directory
+        Initialize MasterActionsTool with RAG-based retrieval
         
         Args:
-            cache_dir: Directory containing cached S3 documents (e.g., /tmp/hr_bot_s3_cache/employee/)
+            cache_dir: Directory containing cached S3 documents
+            document_paths: Optional list of document file paths (for S3 documents)
+            s3_version_hash: Optional S3 ETag-based version hash for cache invalidation
+            force_rebuild: Force rebuild of indexes even if cache exists
         """
-        database_instance = MasterActionsDatabase(cache_dir=cache_dir)
-        kwargs['database'] = database_instance
+        retriever_instance = MasterActionsRetriever(
+            cache_dir=cache_dir,
+            document_paths=document_paths,
+            s3_version_hash=s3_version_hash
+        )
+        kwargs['retriever'] = retriever_instance
         super().__init__(**kwargs)
         
         # Initialize _last_sources
         object.__setattr__(self, '_last_sources', [])
+        
+        # Build index
+        print("🔧 Initializing Master Actions Tool...")
+        self.retriever.build_index(force_rebuild=force_rebuild)
+        print("✅ Master Actions Tool ready!")
     
     def _run(self, query: str) -> str:
         """
-        Execute search for procedural actions
+        Execute hybrid search for procedural actions
         
         Args:
             query: User's query about HOW TO perform an action
             
         Returns:
-            Formatted string with links and steps, or "NO_ACTION_FOUND"
+            Formatted string with action content, or "NO_ACTION_FOUND"
         """
         try:
-            # Reset last sources for this invocation to avoid leaking previous runs
+            # Reset sources
             object.__setattr__(self, '_last_sources', [])
             
-            # Search for matching actions
-            matching_actions = self.database.search_actions(query)
+            # Check if index is built
+            if not self.retriever.documents:
+                return "NO_ACTION_FOUND"
             
-            if not matching_actions:
+            # Perform search
+            results = self.retriever.search(query, top_k=5)
+            
+            if not results:
+                return "NO_ACTION_FOUND"
+            
+            # Check relevance threshold
+            best_score = max(r.score for r in results)
+            if best_score < MasterActionsRetriever.CONFIDENCE_THRESHOLD:
                 return "NO_ACTION_FOUND"
             
             # Format output
-            output = f"Found {len(matching_actions)} relevant action(s):\n\n"
+            output = f"Found {len(results)} relevant action(s):\n\n"
             
-            sources: Dict[str, List[str]] = {}
-            for idx, action in enumerate(matching_actions, 1):
-                output += f"**{idx}. {action.action_name}**\n"
-                if action.link:
-                    output += f"🔗 Link: {action.link}\n\n"
-                else:
-                    output += "🔗 Link: Not provided. Follow the steps below.\n\n"
-                output += "**Steps:**\n"
-                for step_num, step in enumerate(action.steps, 1):
-                    output += f"   {step_num}. {step}\n"
-                output += "\n"
-                
-                source_key = action.source or "Master Actions Guide"
-                sources.setdefault(source_key, []).append(action.action_name)
+            sources = set()
+            for idx, result in enumerate(results, 1):
+                output += f"**[{idx}]** (Score: {result.score:.3f})\n"
+                output += f"{result.content}\n\n"
+                sources.add(result.source)
             
-            # Store sources in "Document → action names" format to avoid randomness
-            formatted_sources: List[str] = []
-            for doc_name, action_names in sources.items():
-                joined_actions = "; ".join(action_names)
-                formatted_sources.append(f"{doc_name}: {joined_actions}")
-            object.__setattr__(self, '_last_sources', formatted_sources)
-            output += "Sources: " + " | ".join(formatted_sources) + "\n"
+            # Store sources
+            source_list = list(sources)
+            object.__setattr__(self, '_last_sources', source_list)
+            
+            output += "Sources: " + " • ".join(source_list) + "\n"
             
             return output
             
@@ -675,7 +609,7 @@ class MasterActionsTool(BaseTool):
             return list(object.__getattribute__(self, '_last_sources'))
         except AttributeError:
             return []
-
+    
     def clear_last_sources(self) -> None:
         """Explicitly clear cached source metadata."""
         object.__setattr__(self, '_last_sources', [])

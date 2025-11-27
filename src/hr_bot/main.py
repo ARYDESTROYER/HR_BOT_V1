@@ -36,8 +36,8 @@ def run():
     print("HR Bot - Production-Ready HR Assistant")
     print("="*70 + "\n")
     
-    # Default query for testing
-    default_query = "what performance calibration policy of the company ?"
+    # Default query for testing — different topic: harassment/whistleblower (sensitive)
+    default_query = "A colleague has been making inappropriate comments about my appearance. What should I do? What are my options and how do I report this?"
     
     # Check if query is provided as argument
     if len(sys.argv) > 1 and sys.argv[0] != 'crewai':

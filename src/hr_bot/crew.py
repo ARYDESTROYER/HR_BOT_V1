@@ -262,7 +262,10 @@ class HrBot():
             print(f"⚡ Using cached RAG tool for {self.user_role} role ({cached_mode})")
             # Always create a fresh Master Actions Tool to avoid carrying over state
             if cached_mode == "s3" and cached_cache_dir:
-                self.master_actions_tool = MasterActionsTool(cache_dir=cached_cache_dir)
+                self.master_actions_tool = MasterActionsTool(
+                    cache_dir=cached_cache_dir,
+                    s3_version_hash=cached_entry.get("s3_version_hash")
+                )
             else:
                 self.master_actions_tool = MasterActionsTool()
         else:
@@ -289,7 +292,10 @@ class HrBot():
                         s3_version_hash=s3_version_hash
                     )
                     print(f"✅ Loaded {len(s3_documents)} documents from S3")
-                    self.master_actions_tool = MasterActionsTool(cache_dir=s3_cache_dir)
+                    self.master_actions_tool = MasterActionsTool(
+                        cache_dir=s3_cache_dir,
+                        s3_version_hash=s3_version_hash
+                    )
                     cache_mode = "s3"
                 else:
                     print("⚠️  No S3 documents available. Falling back to local data directory.")
@@ -306,6 +312,7 @@ class HrBot():
                 "rag_tool": self.hybrid_rag_tool,
                 "mode": cache_mode,
                 "s3_cache_dir": s3_cache_dir,
+                "s3_version_hash": s3_version_hash,
             }
             print(f"💾 Cached RAG tool for {self.user_role} role ({cache_mode})")
 
@@ -397,9 +404,22 @@ class HrBot():
             Formatted response string
         """
         raw_query = (query or "").strip()
-        # Fall back to original query if stripping removed everything
-        raw_query = raw_query or query or ""
+        # raw_query is now stripped - don't fall back to unstripped value
         retrieval_input = (retrieval_query or query or "").strip() or raw_query
+
+        # ============================================================
+        # PRODUCTION GUARDS - Pre-validation before processing
+        # ============================================================
+        
+        # Guard 1: Empty/Whitespace Query (check STRIPPED query length)
+        if not raw_query or len(raw_query) < 3:
+            print("GUARD: Empty or too short query detected")
+            return "Hi! 👋 I noticed you haven't typed a question yet. How can I help you with HR policies today? You can ask me about leave policies, benefits, expense claims, or any other HR-related questions!"
+        
+        # Guard 2: Query Length Limit (2500 characters)
+        if len(raw_query) > 2500:
+            print(f"GUARD: Query too long ({len(raw_query)} chars, max 2500)")
+            return "Your question is quite long! 📝 Please try asking a shorter, more focused question about HR policies. I work best with concise questions under 2500 characters."
 
         # CRITICAL FIX: Check for legitimate HR policy questions FIRST
         # before applying content safety filters. Serious concerns (harassment,

@@ -823,6 +823,11 @@ class HybridRAGRetriever:
         # BYOD
         if "byod" in ql or "own device" in ql:
             expansions += ["bring your own device", "device security", "mobile device"]
+        # Harassment / Complaint / Reporting
+        if any(k in ql for k in ["harassment", "inappropriate", "uncomfortable", "complaint", "report", "misconduct"]):
+            expansions += ["anti-harassment", "reporting mechanism", "internal complaints committee", "ICC", 
+                          "whistleblower", "grievance", "ethics", "zero tolerance", "definition of harassment",
+                          "disciplinary action", "confidential", "retaliation"]
         if expansions:
             q = f"{q} " + " ".join(set(expansions))
         return q
@@ -954,21 +959,8 @@ class HybridRAGTool(BaseTool):
             detected_category = self.retriever._detect_query_category(query)
             
             # Perform hybrid search with optional category filtering
-            meta = self.retriever.hybrid_search_with_metadata(query, top_k, detected_category)
-            # Re-fetch full SearchResult objects using chunk ids to ensure full context
-            chunk_ids = [r["chunk_id"] for r in meta["results"]]
-            full_map = {d.metadata['chunk_id']: d for d in self.retriever.documents if d.metadata.get('chunk_id') in chunk_ids}
-            results: List[SearchResult] = []
-            for r in meta["results"]:
-                doc = full_map.get(r["chunk_id"])
-                if not doc:
-                    continue
-                results.append(SearchResult(
-                    content=doc.page_content,
-                    source=r["source"],
-                    score=r["score"],
-                    chunk_id=r["chunk_id"]
-                ))
+            # hybrid_search returns merged results with adjacent chunks combined
+            results = self.retriever.hybrid_search(query, top_k, detected_category)
             
             if not results:
                 return "NO_RELEVANT_DOCUMENTS"

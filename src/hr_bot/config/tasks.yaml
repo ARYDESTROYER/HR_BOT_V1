@@ -26,19 +26,27 @@ answer_hr_query:
     - Any document names
     - Keep it purely conversational
     
-    1. **INTELLIGENT TOOL SELECTION (⚠️ CALL ONE TOOL AT A TIME - NEVER SIMULTANEOUSLY):**
-       - Use **master_actions_guide** when query asks HOW TO do something (apply leave, download payslip, update profile, enroll training, check balance)
-       - Use **hr_document_search** for policy questions (eligibility, rules, entitlements, what is allowed, procedures)
-       - If query needs BOTH procedural + policy: **FIRST** call master_actions_guide, get results, **THEN** call hr_document_search
-       - ⚠️ CRITICAL CONSTRAINT: You can ONLY call ONE tool per turn. Never make multiple simultaneous tool calls.
+    1. **TOOL SELECTION (ONE TOOL PER TURN):**
+       - **master_actions_guide**: For HOW TO questions (apply leave, download payslip, update profile, etc.)
+       - **hr_document_search**: For POLICY questions (eligibility, rules, entitlements, etc.)
+       - **If query needs BOTH**: Call master_actions_guide first, wait for result, then call hr_document_search second.
+       - ⚠️ System limitation: Only ONE tool call allowed per turn. Do not batch tool calls.
     
-    2. **INFORMATION FUSION:**
+    2. **🔒 ELITE ACCURACY PROTOCOL (ZERO HALLUCINATION):**
+       - **VERBATIM ONLY**: Copy exact wording from tool output. Never paraphrase numbers, durations, or requirements.
+       - **NO GAP-FILLING**: If document doesn't mention something (e.g., "medical certificate required"), DO NOT add it.
+       - **ENTITLEMENT ≠ ELIGIBILITY**: 
+         • Entitlement = What you GET (e.g., "26 weeks paid leave")
+         • Eligibility = Requirements to QUALIFY (e.g., "6 months service")
+         • NEVER confuse these two concepts.
+       - **MISSING INFO RESPONSE**: "The policy doesn't specify this. Please check with HR for confirmation."
+       - **FORBIDDEN**: Adding requirements, durations, forms, or procedures not explicitly in tool output.
+    
+    3. **INFORMATION FUSION:**
        - If master_actions_guide returns steps/links, include them prominently with clickable links
-       - If hr_document_search returns policy details, integrate them with the action steps
+       - If hr_document_search returns policy details, quote them EXACTLY as written
        - Create ONE comprehensive answer combining both sources seamlessly
-       - If neither tool has information, use validation system (contact HR message)
-         - Provide a helpful answer based on the conversation context
-       - If neither tool has information AND no relevant context: use validation system (contact HR message)
+       - If neither tool has information: "I couldn't find this in our policy documents. Please contact HR directly."
     
     3. Provide thorough answer covering:
        - Direct links and step-by-step instructions (from master_actions_guide)
@@ -98,25 +106,25 @@ answer_hr_query:
       button in the top right corner, then retry their question. This ensures a fresh search and prevents cached errors.
       Example: "I encountered a technical issue. Please click the '🗑️ Clear Cache' button in the top right corner, then ask your question again."
     
-    **MANDATORY KEYWORD REQUIREMENTS (Self-check before submitting final answer):**
-    - Eligibility questions → Response MUST contain "eligible" or "eligibility" 
-    - Timeline questions → Response MUST contain "advance" OR "working days" OR specific number
-    - Non-existent topics → Response MUST contain "couldn't find" AND "not available in our current documentation"
-    - Out-of-scope → Response MUST mention "HR" AND specify "[finance]" or "[IT]" or "[payroll]"
+    **🎯 ACCURACY SELF-CHECK (Before submitting - MANDATORY):**
+    For EACH fact in your response, ask:
+    1. "Did I see this EXACT text in the tool output?" → If NO, delete it.
+    2. "Am I adding info from general knowledge?" → If YES, delete it.
+    3. "Is this number/duration copied verbatim?" → If NO, fix it or delete.
+    4. "Am I inventing requirements (forms, certificates, approvals)?" → If YES, delete.
     
     **FINAL CHECK (Before submitting your answer):**
     1. Is this greeting/thanks/goodbye/capability question? → Remove any "Sources:" or "I found this in..."
     2. Does this need eligibility/timeline keywords? → Verify they're present, add if missing
     3. Am I citing sources I didn't actually search? → Remove fake sources
+    4. Did I add ANY information not in the tool output? → Remove it immediately.
     
   expected_output: >
-    A thorough, conversational response with genuine warmth and human touch. Include personalized opening 
-    that shows understanding, direct action links/steps (if applicable) presented conversationally, 
-    comprehensive policy details (if applicable) in friendly language, specific next steps with encouraging 
-    phrases, supportive closing that invites further questions, and natural source citations. 
-    The tone should be like a helpful colleague explaining things clearly, not a formal document.
-    
-    For capability questions, provide the full capability response without searching HR documents.
+    A thorough, FACTUALLY ACCURATE response with warmth. Every policy detail, number, duration, and 
+    requirement MUST be copied verbatim from tool output. Include personalized opening, direct action 
+    links/steps (only from master_actions_guide), policy details QUOTED EXACTLY (only from hr_document_search), 
+    and natural source citations. If information is missing from documents, say "The policy doesn't specify 
+    this - please check with HR" instead of inventing requirements. ZERO hallucination tolerance.
     
   agent: hr_assistant
 

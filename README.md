@@ -1,4 +1,4 @@
-## HR Bot v6.7 – Enterprise AI HR Assistant
+## Inara HR Assistant v7.0 – Enterprise AI HR Assistant
 
 Production-ready AI assistant for HR teams, powered by **CrewAI** and **Amazon Bedrock Nova Lite**, with **role-based S3 document access**, **ETag-based smart caching**, and a **modern Chainlit web UI**.
 
@@ -16,7 +16,7 @@ Production-ready AI assistant for HR teams, powered by **CrewAI** and **Amazon B
 
 ---
 
-## 2. Key Features (v6.7)
+## 2. Key Features (v7.0)
 
 ### 2.1 Role-Based S3 Document Management
 
@@ -71,13 +71,16 @@ The v6.7 release improves intent precision by expanding `stop_words` (e.g., `day
 	- Real-time agent status (Analyzing → Searching → Preparing)
 	- Premium dark theme, responsive layout, and branding-friendly header.
 
-### 2.6 v6.7-Specific Improvements
+### 2.6 v7.0-Specific Improvements
 
 - **Message hardening:** `_author_as_string` ensures Chainlit messages never serialize `cl.User` objects (fixing “author must be a string”).
-- **Branding:**
-	- Custom CSS and mascot/logo assets (larger header logo, on-brand avatars).
-	- `.chainlit/config.toml` wired to `/public/custom.css` and updated public assets.
-- **Asset sync:** `scripts/sync_public_assets.py` keeps `public/` logos and avatars in sync.
+- **Production guards:** Added input validation to prevent empty/short queries and overly long queries (now configurable; default limit set to 2500 characters). This stops accidental tool misuse and prompt-injection style inputs.
+- **Assistant vs Company naming fix:** Clarified backstory so the assistant name `Inara` is never used as the employer/company name; responses now say "your company" when referring to employer policies, while `Inara` remains the assistant's name.
+- **S3 & cache improvements:** RAG cache keys now include S3 version hashes (ETag) to ensure deterministic cache invalidation when documents change.
+- **Source handling:** Source matching made case-insensitive and more robust to prevent duplicate/partial matches when injecting sources into answers.
+- **PII redaction & memory safeguards:** Improved PII detection and redaction in conversation memory to avoid storing SSNs, credit card numbers, and other sensitive identifiers.
+- **Hybrid RAG fixes:** Fixed RAG chunk merging bug to prevent splitting semantically connected content across chunks, improving answer quality and citation accuracy.
+- **Misc:** small UX and CI fixes, improved tests and evaluation dataset coverage.
 
 ---
 
