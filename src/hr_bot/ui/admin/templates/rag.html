@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+
+{% block title %}RAG Index{% endblock %}
+{% block header %}RAG Index Management{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <!-- RAG Status -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div class="bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm text-gray-400 mb-1">Index Status</p>
+                    <p class="text-xl font-bold {% if rag_stats.status == 'healthy' %}text-green-400{% else %}text-amber-400{% endif %}">
+                        {{ rag_stats.status|capitalize if rag_stats.status else 'Unknown' }}
+                    </p>
+                </div>
+                <div class="w-12 h-12 {% if rag_stats.status == 'healthy' %}bg-green-500/20{% else %}bg-amber-500/20{% endif %} rounded-lg flex items-center justify-center">
+                    {% if rag_stats.status == 'healthy' %}
+                    <svg class="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    {% else %}
+                    <svg class="w-6 h-6 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                    </svg>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <div class="bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm text-gray-400 mb-1">Vector Store Size</p>
+                    <p class="text-xl font-bold text-blue-400">{{ rag_stats.vector_count if rag_stats.vector_count else '0' }}</p>
+                </div>
+                <div class="w-12 h-12 bg-blue-500/20 rounded-lg flex items-center justify-center">
+                    <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/>
+                    </svg>
+                </div>
+            </div>
+        </div>
+        
+        <div class="bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm text-gray-400 mb-1">Embedding Model</p>
+                    <p class="text-sm font-bold text-white">{{ rag_stats.embedding_model if rag_stats.embedding_model else 'OpenAI' }}</p>
+                </div>
+                <div class="w-12 h-12 bg-purple-500/20 rounded-lg flex items-center justify-center">
+                    <svg class="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                    </svg>
+                </div>
+            </div>
+        </div>
+        
+        <div class="bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm text-gray-400 mb-1">Last Updated</p>
+                    <p class="text-sm font-bold text-white">{{ rag_stats.last_updated if rag_stats.last_updated else 'Never' }}</p>
+                </div>
+                <div class="w-12 h-12 bg-gray-500/20 rounded-lg flex items-center justify-center">
+                    <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Document Stats -->
+    <div class="bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50">
+        <h2 class="text-lg font-semibold text-white mb-6">Document Sources</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Employee Documents -->
+            <div class="bg-gray-800/50 rounded-lg p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="font-medium text-white">Employee Documents</h3>
+                    <span class="px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-sm">
+                        {{ doc_stats.employee_count if doc_stats.employee_count else 0 }} files
+                    </span>
+                </div>
+                <div class="space-y-2 text-sm text-gray-400">
+                    <div class="flex justify-between">
+                        <span>S3 Bucket</span>
+                        <span class="text-white">{{ doc_stats.employee_bucket if doc_stats.employee_bucket else 'hr-bot-docs' }}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>Prefix</span>
+                        <span class="text-white">Regular-Employee-Documents/</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>Total Size</span>
+                        <span class="text-white">{{ doc_stats.employee_size if doc_stats.employee_size else '-' }}</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Executive Documents -->
+            <div class="bg-gray-800/50 rounded-lg p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="font-medium text-white">Executive Documents</h3>
+                    <span class="px-3 py-1 bg-blue-500/20 text-blue-400 rounded-full text-sm">
+                        {{ doc_stats.executive_count if doc_stats.executive_count else 0 }} files
+                    </span>
+                </div>
+                <div class="space-y-2 text-sm text-gray-400">
+                    <div class="flex justify-between">
+                        <span>S3 Bucket</span>
+                        <span class="text-white">{{ doc_stats.executive_bucket if doc_stats.executive_bucket else 'hr-bot-docs' }}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>Prefix</span>
+                        <span class="text-white">Executive-Only-Documents/</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>Total Size</span>
+                        <span class="text-white">{{ doc_stats.executive_size if doc_stats.executive_size else '-' }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Actions -->
+    <div class="bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50">
+        <h2 class="text-lg font-semibold text-white mb-4">Index Actions</h2>
+        <div class="flex flex-wrap gap-4">
+            <button 
+                hx-post="/admin/api/docs/refresh"
+                hx-target="#rag-action-result"
+                hx-swap="innerHTML"
+                class="px-6 py-3 bg-blue-600/80 hover:bg-blue-600 rounded-lg text-white font-medium transition-colors flex items-center space-x-2"
+            >
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                <span>Refresh S3 Documents</span>
+            </button>
+            
+            <button 
+                hx-post="/admin/api/rag/rebuild"
+                hx-target="#rag-action-result"
+                hx-swap="innerHTML"
+                hx-confirm="This will rebuild the entire RAG index. Continue?"
+                class="px-6 py-3 bg-amber-600/80 hover:bg-amber-600 rounded-lg text-white font-medium transition-colors flex items-center space-x-2"
+            >
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+                </svg>
+                <span>Rebuild Index</span>
+            </button>
+        </div>
+        
+        <div id="rag-action-result" class="mt-4"></div>
+    </div>
+    
+    <!-- Test Search -->
+    <div class="bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50">
+        <h2 class="text-lg font-semibold text-white mb-4">Test RAG Search</h2>
+        <form 
+            hx-post="/admin/api/rag/search"
+            hx-target="#search-results"
+            hx-swap="innerHTML"
+            class="space-y-4"
+        >
+            <div class="flex space-x-4">
+                <input 
+                    type="text" 
+                    name="query"
+                    placeholder="Enter a test query..."
+                    class="flex-1 px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+                >
+                <button 
+                    type="submit"
+                    class="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-white font-medium transition-colors"
+                >
+                    Search
+                </button>
+            </div>
+        </form>
+        
+        <div id="search-results" class="mt-4"></div>
+    </div>
+    
+    <!-- RAG Configuration -->
+    <div class="bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50">
+        <h2 class="text-lg font-semibold text-white mb-4">RAG Configuration</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div class="flex items-center justify-between p-4 bg-gray-800/50 rounded-lg">
+                <span class="text-gray-400">Top K Results</span>
+                <span class="text-white font-medium">{{ rag_stats.top_k if rag_stats.top_k else '12' }}</span>
+            </div>
+            <div class="flex items-center justify-between p-4 bg-gray-800/50 rounded-lg">
+                <span class="text-gray-400">BM25 Weight</span>
+                <span class="text-white font-medium">{{ rag_stats.bm25_weight if rag_stats.bm25_weight else '0.5' }}</span>
+            </div>
+            <div class="flex items-center justify-between p-4 bg-gray-800/50 rounded-lg">
+                <span class="text-gray-400">Vector Weight</span>
+                <span class="text-white font-medium">{{ rag_stats.vector_weight if rag_stats.vector_weight else '0.5' }}</span>
+            </div>
+            <div class="flex items-center justify-between p-4 bg-gray-800/50 rounded-lg">
+                <span class="text-gray-400">Chunk Size</span>
+                <span class="text-white font-medium">{{ rag_stats.chunk_size if rag_stats.chunk_size else '1000' }}</span>
+            </div>
+            <div class="flex items-center justify-between p-4 bg-gray-800/50 rounded-lg">
+                <span class="text-gray-400">Chunk Overlap</span>
+                <span class="text-white font-medium">{{ rag_stats.chunk_overlap if rag_stats.chunk_overlap else '200' }}</span>
+            </div>
+            <div class="flex items-center justify-between p-4 bg-gray-800/50 rounded-lg">
+                <span class="text-gray-400">Reranking</span>
+                <span class="text-white font-medium">{{ 'Enabled' if rag_stats.reranking else 'Disabled' }}</span>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

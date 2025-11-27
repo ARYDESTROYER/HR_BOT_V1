@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+
+{% block title %}Logs{% endblock %}
+{% block header %}Query & Audit Logs{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <!-- Tab Navigation -->
+    <div class="border-b border-gray-700">
+        <nav class="flex space-x-8">
+            <button 
+                id="tab-query" 
+                onclick="showTab('query')"
+                class="tab-btn py-4 px-1 border-b-2 border-indigo-500 text-indigo-400 font-medium"
+            >
+                Query Logs
+            </button>
+            <button 
+                id="tab-audit" 
+                onclick="showTab('audit')"
+                class="tab-btn py-4 px-1 border-b-2 border-transparent text-gray-400 hover:text-white font-medium"
+            >
+                Admin Audit Log
+            </button>
+        </nav>
+    </div>
+    
+    <!-- Query Logs Tab -->
+    <div id="panel-query" class="tab-panel">
+        <div class="bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-white">Recent Queries</h2>
+                <span class="text-sm text-gray-400">Last 100 queries</span>
+            </div>
+            
+            {% if query_logs %}
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead>
+                        <tr class="border-b border-gray-700">
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Time</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">User</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Query</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Source</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Duration</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-700/50">
+                        {% for log in query_logs %}
+                        <tr class="hover:bg-gray-700/30 transition-colors">
+                            <td class="px-4 py-3 text-sm text-gray-400 whitespace-nowrap">{{ log.timestamp }}</td>
+                            <td class="px-4 py-3">
+                                <div class="flex items-center">
+                                    <div class="w-6 h-6 rounded-full bg-indigo-600/50 flex items-center justify-center text-xs text-white mr-2">
+                                        {{ log.user[0]|upper if log.user else '?' }}
+                                    </div>
+                                    <span class="text-sm text-gray-300">{{ log.user if log.user else 'Anonymous' }}</span>
+                                </div>
+                            </td>
+                            <td class="px-4 py-3">
+                                <div class="text-sm text-white max-w-md truncate" title="{{ log.query }}">
+                                    {{ log.query[:80] }}{% if log.query|length > 80 %}...{% endif %}
+                                </div>
+                            </td>
+                            <td class="px-4 py-3">
+                                {% if log.cached %}
+                                <span class="px-2 py-1 bg-green-500/20 text-green-400 rounded text-xs">Cached</span>
+                                {% else %}
+                                <span class="px-2 py-1 bg-blue-500/20 text-blue-400 rounded text-xs">RAG</span>
+                                {% endif %}
+                            </td>
+                            <td class="px-4 py-3 text-sm text-gray-400">{{ log.duration if log.duration else '-' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-center py-12 text-gray-500">
+                <svg class="w-12 h-12 mx-auto mb-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                </svg>
+                <p>No query logs available</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- Audit Logs Tab -->
+    <div id="panel-audit" class="tab-panel hidden">
+        <div class="bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-white">Admin Actions</h2>
+                <span class="text-sm text-gray-400">Last 50 actions</span>
+            </div>
+            
+            {% if audit_logs %}
+            <div class="space-y-3">
+                {% for log in audit_logs %}
+                <div class="flex items-start space-x-4 p-4 bg-gray-800/50 rounded-lg">
+                    <div class="w-10 h-10 rounded-full bg-amber-600/20 flex items-center justify-center flex-shrink-0">
+                        <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                        </svg>
+                    </div>
+                    <div class="flex-1">
+                        <div class="flex items-center justify-between">
+                            <span class="font-medium text-white">{{ log.action }}</span>
+                            <span class="text-sm text-gray-500">{{ log.timestamp }}</span>
+                        </div>
+                        <p class="text-sm text-gray-400 mt-1">by {{ log.admin }}</p>
+                        {% if log.details %}
+                        <pre class="text-xs text-gray-500 mt-2 bg-gray-900/50 p-2 rounded overflow-x-auto">{{ log.details }}</pre>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="text-center py-12 text-gray-500">
+                <svg class="w-12 h-12 mx-auto mb-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                </svg>
+                <p>No admin actions logged yet</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showTab(tab) {
+    // Hide all panels
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
+    // Deactivate all tabs
+    document.querySelectorAll('.tab-btn').forEach(t => {
+        t.classList.remove('border-indigo-500', 'text-indigo-400');
+        t.classList.add('border-transparent', 'text-gray-400');
+    });
+    
+    // Show selected panel
+    document.getElementById('panel-' + tab).classList.remove('hidden');
+    // Activate selected tab
+    const activeTab = document.getElementById('tab-' + tab);
+    activeTab.classList.remove('border-transparent', 'text-gray-400');
+    activeTab.classList.add('border-indigo-500', 'text-indigo-400');
+}
+</script>
+{% endblock %}

@@ -58,3 +58,7 @@ frontend/.cache/
 node_modules/
 .streamlit/secrets.toml
 storage/response_cache/
+
+# Query logs (runtime generated)
+data/logs/
+*.jsonl

@@ -13,11 +13,56 @@ from typing import Dict, List, Optional
 
 import chainlit as cl
 from starlette.datastructures import Headers
+from starlette.routing import Mount
+from starlette.staticfiles import StaticFiles
 
 from hr_bot.crew import HrBot
 from hr_bot.utils.s3_loader import S3DocumentLoader
 
+# Import admin routes
+try:
+    from hr_bot.ui.admin import admin_routes
+    from hr_bot.ui.admin.routes import STATIC_DIR as ADMIN_STATIC_DIR
+    ADMIN_AVAILABLE = True
+except ImportError as e:
+    logging.getLogger("hr_bot.chainlit").warning("Admin module not available: %s", e)
+    admin_routes = None
+    ADMIN_STATIC_DIR = None
+    ADMIN_AVAILABLE = False
+
 logger = logging.getLogger("hr_bot.chainlit")
+
+# ---------------------------------------------------------------------------
+# Mount Admin Console Routes
+# ---------------------------------------------------------------------------
+# This must be done early, before other Chainlit routes are processed
+
+if ADMIN_AVAILABLE and admin_routes is not None:
+    try:
+        # Get the Chainlit app and mount admin routes
+        from chainlit.server import app as chainlit_app
+        from starlette.routing import Mount
+        
+        # Create route mounts for admin
+        admin_mount = Mount("/admin", app=admin_routes)
+        
+        # Mount static files for admin CSS/JS
+        if ADMIN_STATIC_DIR and ADMIN_STATIC_DIR.exists():
+            static_mount = Mount(
+                "/admin/static",
+                app=StaticFiles(directory=str(ADMIN_STATIC_DIR)),
+                name="admin_static"
+            )
+            # Insert static route at the beginning so it takes precedence
+            chainlit_app.routes.insert(0, static_mount)
+        
+        # Insert admin route at the beginning so it takes precedence over catch-all
+        chainlit_app.routes.insert(0, admin_mount)
+        
+        logger.info("Admin console mounted at /admin")
+    except Exception as e:
+        logger.error("Failed to mount admin routes: %s", e)
+        ADMIN_AVAILABLE = False
 
 # Centralized branding configuration read from env or default
 APP_NAME = os.getenv("APP_NAME", "Inara")
@@ -91,6 +136,14 @@ def _derive_role(email: Optional[str]) -> str:
     if normalized in _env_list("EMPLOYEE_EMAILS"):
         return "employee"
     return "unauthorized"
+
+
+def _is_admin(email: Optional[str]) -> bool:
+    """Check if the given email is in the ADMIN_EMAILS list."""
+    normalized = _normalize_email(email)
+    if not normalized:
+        return False
+    return normalized in _env_list("ADMIN_EMAILS")
 
 
 def _display_name(email: str, fallback: Optional[str]) -> str:
@@ -302,7 +355,7 @@ def _compose_dashboard(display_name: str, role: str) -> str:
     )
 
 
-async def _send_dashboard(display_name: str, role: str) -> None:
+async def _send_dashboard(display_name: str, role: str, email: Optional[str] = None) -> None:
     actions = [
         cl.Action(
             name="refresh_s3_docs",
@@ -319,6 +372,19 @@ async def _send_dashboard(display_name: str, role: str) -> None:
             icon="Eraser",
         ),
     ]
+    
+    # Add Admin Console action for admin users
+    if ADMIN_AVAILABLE and email and _is_admin(email):
+        actions.append(
+            cl.Action(
+                name="open_admin_console",
+                payload={},
+                label="Admin Console",
+                tooltip="Open the admin dashboard",
+                icon="Settings",
+            )
+        )
+    
     message = cl.Message(
         author=_author_as_string(f"{APP_NAME} Control Center"),
         content=_compose_dashboard(display_name, role),
@@ -348,6 +414,30 @@ async def _clear_response_cache(role: str) -> str:
         bot = await _get_bot(role)
     await _run_blocking(bot.response_cache.clear_all)
     return "Response cache cleared successfully."
+
+
+def _log_query(email: str, query: str, cached: bool = False, duration: float = 0.0) -> None:
+    """Log a query for admin analytics."""
+    import json
+    from datetime import datetime
+    
+    log_dir = Path("data/logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "queries.jsonl"
+    
+    entry = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "user": email,
+        "query": query[:200],  # Truncate for storage
+        "cached": cached,
+        "duration": f"{duration:.2f}s" if duration else None,
+    }
+    
+    try:
+        with open(log_file, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as e:
+        logger.warning("Failed to log query: %s", e)
 
 
 async def _query_bot(prompt: str) -> str:
@@ -448,7 +538,7 @@ async def on_chat_start() -> None:
     bot = await _get_bot(role)
     cl.user_session.set("bot", bot)
     await _ensure_warm(role, bot)
-    await _send_dashboard(display_name, role)
+    await _send_dashboard(display_name, role, email)
     await cl.Message(
         author=_author_as_string(APP_NAME),
         content=(
@@ -463,6 +553,8 @@ async def on_message(message: cl.Message) -> None:
     prompt = (message.content or "").strip()
     if not prompt:
         return
+    
+    email = cl.user_session.get("email", "anonymous")
     history = _history()
     history.append({"role": "user", "content": prompt})
     _set_history(history)
@@ -473,17 +565,29 @@ async def on_message(message: cl.Message) -> None:
     )
     await progress.send()
 
+    import time
+    start_time = time.time()
+    cached = False
+    
     try:
         answer = await _query_bot(prompt)
+        duration = time.time() - start_time
+        # Check if response was cached (fast response indicates cache hit)
+        cached = duration < 1.0
     except Exception as exc:
+        duration = time.time() - start_time
         logger.exception("Failed to answer question", exc_info=exc)
         progress.content = (
             "⚠️ Technical issue while generating a response. Please try again or trigger "
             "'Clear Response Cache'."
         )
         await progress.update()
+        _log_query(email, prompt, cached=False, duration=duration)
         return
 
+    # Log the query
+    _log_query(email, prompt, cached=cached, duration=duration)
+    
     formatted = format_answer(answer)
     history.append({"role": "assistant", "content": formatted})
     _set_history(history)
@@ -512,6 +616,22 @@ async def clear_cache(action: cl.Action) -> None:
     except Exception as exc:
         logger.exception("Cache clear failed", exc_info=exc)
         await cl.Message(content=f"⚠️ Error clearing cache: {exc}").send()
+
+
+@cl.action_callback("open_admin_console")
+async def open_admin(action: cl.Action) -> None:
+    """Handle admin console button click - send a link to open in new tab."""
+    email = cl.user_session.get("email")
+    if not _is_admin(email):
+        await cl.Message(content="⚠️ Access denied. Admin privileges required.").send()
+        return
+    
+    await cl.Message(
+        content="🔧 **Admin Console**\n\n"
+                "Click the link below to open the admin dashboard in a new tab:\n\n"
+                "➡️ [Open Admin Console](/admin/)\n\n"
+                "_Note: You must be logged in to access the admin console._"
+    ).send()
 
 
 @cl.on_stop

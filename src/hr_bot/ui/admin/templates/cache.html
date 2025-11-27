@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}Cache Management{% endblock %}
+{% block header %}Cache Management{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <!-- Cache Stats -->
+    <div id="cache-stats" hx-get="/admin/api/cache/stats" hx-trigger="load, every 30s" hx-swap="innerHTML">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="bg-gray-800/50 rounded-lg p-4">
+                <div class="text-2xl font-bold text-white">{{ stats.total_entries }}</div>
+                <div class="text-sm text-gray-400">Total Entries</div>
+            </div>
+            <div class="bg-gray-800/50 rounded-lg p-4">
+                <div class="text-2xl font-bold text-green-400">{{ stats.hit_rate }}</div>
+                <div class="text-sm text-gray-400">Hit Rate</div>
+            </div>
+            <div class="bg-gray-800/50 rounded-lg p-4">
+                <div class="text-2xl font-bold text-blue-400">{{ stats.hits }}</div>
+                <div class="text-sm text-gray-400">Cache Hits</div>
+            </div>
+            <div class="bg-gray-800/50 rounded-lg p-4">
+                <div class="text-2xl font-bold text-gray-400">{{ stats.disk_size }}</div>
+                <div class="text-sm text-gray-400">Disk Usage</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Actions -->
+    <div class="bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50">
+        <h2 class="text-lg font-semibold text-white mb-4">Cache Actions</h2>
+        <div class="flex flex-wrap gap-4">
+            <button 
+                hx-post="/admin/api/cache/clear"
+                hx-target="#cache-action-result"
+                hx-swap="innerHTML"
+                hx-confirm="Are you sure you want to clear all cache entries?"
+                class="px-6 py-3 bg-red-600/80 hover:bg-red-600 rounded-lg text-white font-medium transition-colors flex items-center space-x-2"
+            >
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                </svg>
+                <span>Clear All Cache</span>
+            </button>
+            
+            <button 
+                hx-get="/admin/api/cache/stats"
+                hx-target="#cache-stats"
+                hx-swap="innerHTML"
+                class="px-6 py-3 bg-indigo-600/80 hover:bg-indigo-600 rounded-lg text-white font-medium transition-colors flex items-center space-x-2"
+            >
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                <span>Refresh Stats</span>
+            </button>
+        </div>
+        
+        <div id="cache-action-result" class="mt-4"></div>
+    </div>
+    
+    <!-- Cache Entries -->
+    <div class="bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50">
+        <h2 class="text-lg font-semibold text-white mb-4">Recent Cache Entries</h2>
+        
+        {% if entries %}
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead>
+                    <tr class="border-b border-gray-700">
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Query</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Created</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Expires</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Hits</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Size</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-700/50">
+                    {% for entry in entries %}
+                    <tr class="hover:bg-gray-700/30 transition-colors">
+                        <td class="px-4 py-3">
+                            <div class="text-sm text-white max-w-md truncate" title="{{ entry.query }}">
+                                {{ entry.query[:60] }}{% if entry.query|length > 60 %}...{% endif %}
+                            </div>
+                        </td>
+                        <td class="px-4 py-3 text-sm text-gray-400">{{ entry.created }}</td>
+                        <td class="px-4 py-3 text-sm text-gray-400">{{ entry.expires }}</td>
+                        <td class="px-4 py-3">
+                            <span class="px-2 py-1 bg-blue-500/20 text-blue-400 rounded text-xs">{{ entry.hits }}</span>
+                        </td>
+                        <td class="px-4 py-3 text-sm text-gray-400">{{ entry.size }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-8 text-gray-500">
+            <svg class="w-12 h-12 mx-auto mb-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/>
+            </svg>
+            <p>No cache entries found</p>
+        </div>
+        {% endif %}
+    </div>
+    
+    <!-- Cache Configuration -->
+    <div class="bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50">
+        <h2 class="text-lg font-semibold text-white mb-4">Cache Configuration</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="flex items-center justify-between p-4 bg-gray-800/50 rounded-lg">
+                <span class="text-gray-400">TTL (Hours)</span>
+                <span class="text-white font-medium">{{ stats.ttl_hours if stats.ttl_hours else '72' }}</span>
+            </div>
+            <div class="flex items-center justify-between p-4 bg-gray-800/50 rounded-lg">
+                <span class="text-gray-400">Similarity Threshold</span>
+                <span class="text-white font-medium">{{ stats.similarity_threshold if stats.similarity_threshold else '0.75' }}</span>
+            </div>
+            <div class="flex items-center justify-between p-4 bg-gray-800/50 rounded-lg">
+                <span class="text-gray-400">Max Entries</span>
+                <span class="text-white font-medium">{{ stats.max_entries if stats.max_entries else 'Unlimited' }}</span>
+            </div>
+            <div class="flex items-center justify-between p-4 bg-gray-800/50 rounded-lg">
+                <span class="text-gray-400">Storage Location</span>
+                <span class="text-white font-medium">{{ stats.storage_location if stats.storage_location else 'S3 + Local' }}</span>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

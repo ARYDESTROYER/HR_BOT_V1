@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+{% block header %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <!-- Quick Stats -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div class="stat-card bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50 transition-all duration-300">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm text-gray-400 mb-1">Total Queries Today</p>
+                    <p class="text-3xl font-bold text-white">{{ stats.queries_today }}</p>
+                </div>
+                <div class="w-12 h-12 bg-blue-500/20 rounded-lg flex items-center justify-center">
+                    <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/>
+                    </svg>
+                </div>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">↑ {{ stats.query_change }}% from yesterday</p>
+        </div>
+        
+        <div class="stat-card bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50 transition-all duration-300">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm text-gray-400 mb-1">Cache Hit Rate</p>
+                    <p class="text-3xl font-bold text-green-400">{{ stats.cache_hit_rate }}</p>
+                </div>
+                <div class="w-12 h-12 bg-green-500/20 rounded-lg flex items-center justify-center">
+                    <svg class="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/>
+                    </svg>
+                </div>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">{{ stats.cache_entries }} cached responses</p>
+        </div>
+        
+        <div class="stat-card bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50 transition-all duration-300">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm text-gray-400 mb-1">Active Users</p>
+                    <p class="text-3xl font-bold text-purple-400">{{ stats.active_users }}</p>
+                </div>
+                <div class="w-12 h-12 bg-purple-500/20 rounded-lg flex items-center justify-center">
+                    <svg class="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+                    </svg>
+                </div>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">{{ stats.total_users }} total registered</p>
+        </div>
+        
+        <div class="stat-card bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50 transition-all duration-300">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm text-gray-400 mb-1">Documents Indexed</p>
+                    <p class="text-3xl font-bold text-amber-400">{{ stats.documents_indexed }}</p>
+                </div>
+                <div class="w-12 h-12 bg-amber-500/20 rounded-lg flex items-center justify-center">
+                    <svg class="w-6 h-6 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
+                </div>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">Last synced: {{ stats.last_sync }}</p>
+        </div>
+    </div>
+    
+    <!-- Quick Actions -->
+    <div class="bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50">
+        <h2 class="text-lg font-semibold text-white mb-4">Quick Actions</h2>
+        <div class="flex flex-wrap gap-4">
+            <button 
+                hx-post="/admin/api/cache/clear"
+                hx-target="#action-result"
+                hx-swap="innerHTML"
+                class="px-6 py-3 bg-red-600/80 hover:bg-red-600 rounded-lg text-white font-medium transition-colors flex items-center space-x-2"
+            >
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                </svg>
+                <span>Clear Cache</span>
+            </button>
+            
+            <button 
+                hx-post="/admin/api/docs/refresh"
+                hx-target="#action-result"
+                hx-swap="innerHTML"
+                class="px-6 py-3 bg-blue-600/80 hover:bg-blue-600 rounded-lg text-white font-medium transition-colors flex items-center space-x-2"
+            >
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                <span>Refresh S3 Docs</span>
+            </button>
+            
+            <button 
+                hx-post="/admin/api/rag/rebuild"
+                hx-target="#action-result"
+                hx-swap="innerHTML"
+                hx-confirm="Are you sure you want to rebuild the RAG index? This may take a few minutes."
+                class="px-6 py-3 bg-amber-600/80 hover:bg-amber-600 rounded-lg text-white font-medium transition-colors flex items-center space-x-2"
+            >
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+                </svg>
+                <span>Rebuild Index</span>
+            </button>
+        </div>
+        
+        <!-- Action Result -->
+        <div id="action-result" class="mt-4"></div>
+    </div>
+    
+    <!-- System Status -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- RAG Status -->
+        <div class="bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50">
+            <h2 class="text-lg font-semibold text-white mb-4">RAG Index Status</h2>
+            <div class="space-y-4">
+                <div class="flex items-center justify-between">
+                    <span class="text-gray-400">Status</span>
+                    <span class="px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-sm font-medium">
+                        {{ stats.rag_status }}
+                    </span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span class="text-gray-400">Employee Docs</span>
+                    <span class="text-white">{{ stats.employee_docs }}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span class="text-gray-400">Executive Docs</span>
+                    <span class="text-white">{{ stats.executive_docs }}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span class="text-gray-400">Vector Store</span>
+                    <span class="text-white">{{ stats.vector_store_size }}</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Recent Activity -->
+        <div class="bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50">
+            <h2 class="text-lg font-semibold text-white mb-4">Recent Activity</h2>
+            <div class="space-y-3">
+                {% if stats.recent_queries %}
+                    {% for query in stats.recent_queries[:5] %}
+                    <div class="flex items-start space-x-3 py-2 border-b border-gray-700/50 last:border-0">
+                        <div class="w-8 h-8 rounded-full bg-indigo-600/20 flex items-center justify-center flex-shrink-0">
+                            <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/>
+                            </svg>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm text-white truncate">{{ query.query[:50] }}...</p>
+                            <p class="text-xs text-gray-500">{{ query.timestamp }}</p>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="text-gray-500 text-sm">No recent queries</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

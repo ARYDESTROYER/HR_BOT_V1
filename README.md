@@ -1,4 +1,4 @@
-## Inara HR Assistant v7.0 – Enterprise AI HR Assistant
+## Inara HR Assistant v7.1 – Enterprise AI HR Assistant
 
 Production-ready AI assistant for HR teams, powered by **CrewAI** and **Amazon Bedrock Nova Lite**, with **role-based S3 document access**, **ETag-based smart caching**, and a **modern Chainlit web UI**.
 
@@ -10,13 +10,14 @@ Production-ready AI assistant for HR teams, powered by **CrewAI** and **Amazon B
 - **Primary Surface:** Chainlit web app (Streamlit kept only for rollback)
 - **Core Capabilities:**
 	- Role-aware HR policy Q&A (Executive vs Employee views)
-	- “How do I…?” guided workflows via Master Actions
+	- "How do I…?" guided workflows via Master Actions
 	- Hybrid RAG (BM25 + vector) over S3-hosted documents
 	- Ultra-low-cost LLM via Amazon Bedrock Nova Lite
+	- Admin Console for system monitoring and management
 
 ---
 
-## 2. Key Features (v7.0)
+## 2. Key Features (v7.1)
 
 ### 2.1 Role-Based S3 Document Management
 
@@ -81,6 +82,24 @@ The v6.7 release improves intent precision by expanding `stop_words` (e.g., `day
 - **PII redaction & memory safeguards:** Improved PII detection and redaction in conversation memory to avoid storing SSNs, credit card numbers, and other sensitive identifiers.
 - **Hybrid RAG fixes:** Fixed RAG chunk merging bug to prevent splitting semantically connected content across chunks, improving answer quality and citation accuracy.
 - **Misc:** small UX and CI fixes, improved tests and evaluation dataset coverage.
+
+### 2.7 v7.1 – Admin Console
+
+New lightweight admin dashboard at `/admin/` for system monitoring:
+
+- **Dashboard** – quick stats: queries today, cache hit rate, indexed documents
+- **Cache Management** – view cached responses, clear cache, see hit rates
+- **Query Logs** – recent queries with user, timestamp, and response source
+- **User Management** – view configured users (employees, executives, admins)
+- **RAG Index** – status, document counts, rebuild/refresh actions
+- **Settings** – current configuration overview
+
+Access is restricted to emails listed in `ADMIN_EMAILS`. The console uses HTMX for lightweight interactivity—no React or heavy JS frameworks.
+
+```bash
+# Add to .env
+ADMIN_EMAILS=admin@company.com,another-admin@company.com
+```
 
 ---
 
@@ -324,7 +343,12 @@ HR_BOT_V1/
 │   ├── crew.py               # CrewAI orchestration
 │   ├── main.py               # CLI entry points
 │   ├── ui/
-│   │   └── chainlit_app.py   # Main Chainlit app
+│   │   ├── chainlit_app.py   # Main Chainlit app
+│   │   └── admin/            # Admin console (v7.1)
+│   │       ├── routes.py     # Starlette routes
+│   │       ├── services.py   # Backend logic
+│   │       ├── auth.py       # JWT auth helpers
+│   │       └── templates/    # Jinja2 templates
 │   ├── tools/
 │   │   ├── hybrid_rag_tool.py
 │   │   └── master_actions_tool.py
@@ -332,7 +356,7 @@ HR_BOT_V1/
 │       ├── s3_loader.py
 │       └── cache.py
 ├── data/
-│   └── ...                   # Example HR documents
+│   └── logs/                 # Query logs (v7.1)
 ├── deploy/
 │   └── chat-chainlit.service # Sample systemd unit
 ├── pyproject.toml
@@ -345,7 +369,7 @@ HR_BOT_V1/
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ HR Bot v6.7 Architecture                                                │
+│ HR Bot v7.1 Architecture                                                │
 │ Role-Based S3 + ETag Smart Caching + Hybrid RAG + Chainlit UI          │
 └──────────────────────────────────────────────────────────────────────────┘
 
@@ -359,14 +383,14 @@ User Query (Role: Executive/Employee)
 	│  - Clear Resp Cache  │
 	└──────────┬────────────┘
 		   ↓
-	┌──────────────────────┐
-	│      HR Bot          │
-	│   (CrewAI crew)      │
-	│  Nova Lite via       │
-	│  Amazon Bedrock      │
-	│  Semantic Caching    │
-	└──────────┬───────────┘
-		   ↓
+	┌──────────────────────┐          ┌───────────────────┐
+	│      HR Bot          │          │  Admin Console    │
+	│   (CrewAI crew)      │          │  /admin/ (v7.1)   │
+	│  Nova Lite via       │          │  - Dashboard      │
+	│  Amazon Bedrock      │          │  - Cache mgmt     │
+	│  Semantic Caching    │          │  - Query logs     │
+	└──────────┬───────────┘          │  - User mgmt      │
+		   ↓                      └───────────────────┘
 	┌──────────────────────┐
 	│    Hybrid RAG Tool   │
 	│  Role-Based Filters  │
