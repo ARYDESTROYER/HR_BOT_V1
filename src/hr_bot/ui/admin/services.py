@@ -170,7 +170,7 @@ class AdminServices:
         
         return {
             "uptime": uptime,
-            "version": os.getenv("APP_VERSION", "6.7"),
+            "version": os.getenv("APP_VERSION", "7.1"),
             "environment": "production" if not os.getenv("ALLOW_DEV_LOGIN", "false").lower() == "true" else "development",
         }
     

@@ -59,7 +59,7 @@ Pre-built, clickable workflows (with links) for:
 - Update profile
 - Enroll in training
 
-The v6.7 release improves intent precision by expanding `stop_words` (e.g., `day`, `today`, `work`), so onboarding questions don’t incorrectly trigger the “Apply for Half-Day Leave” guide.
+Earlier releases improved intent precision by expanding `stop_words` (e.g., `day`, `today`, `work`), so onboarding questions don't incorrectly trigger the "Apply for Half-Day Leave" guide.
 
 ### 2.5 Chainlit Web UI
 
@@ -72,7 +72,7 @@ The v6.7 release improves intent precision by expanding `stop_words` (e.g., `day
 	- Real-time agent status (Analyzing → Searching → Preparing)
 	- Premium dark theme, responsive layout, and branding-friendly header.
 
-### 2.6 v7.0-Specific Improvements
+### 2.6 v7.1-Specific Improvements
 
 - **Message hardening:** `_author_as_string` ensures Chainlit messages never serialize `cl.User` objects (fixing “author must be a string”).
 - **Production guards:** Added input validation to prevent empty/short queries and overly long queries (now configurable; default limit set to 2500 characters). This stops accidental tool misuse and prompt-injection style inputs.
@@ -135,7 +135,7 @@ ADMIN_EMAILS=admin@company.com,another-admin@company.com
 | Approach           | Annual Cost | Notes                         |
 |-------------------|------------:|--------------------------------|
 | Short TTL (1h)    |   ~$180     | 720 GET/day per role          |
-| ETag-based (v6.7) |   ~$12      | 1 LIST/day + changes only     |
+| ETag-based        |   ~$12      | 1 LIST/day + changes only     |
 
 ### 4.3 Latency
 
