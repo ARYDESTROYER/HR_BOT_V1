@@ -1,6 +1,6 @@
 """
-Production-Ready HR Bot Crew
-Single agent system with Hybrid RAG - Empathetic and Human-like
+Production-Ready General AI Assistant Crew
+Single agent system with Hybrid RAG for documents + direct LLM for general knowledge
 """
 
 from crewai import Agent, Crew, Process, Task, LLM
@@ -551,13 +551,13 @@ class HrBot():
             "what are you",
             "introduce yourself",
             "tell me about you",
-            "who are you hr bot",
+            "who are you inara",
         }
 
         identity_key = normalized.rstrip("?")
         if identity_key in identity:
             return (
-                "I'm the company's HR policy assistant, ready to translate every guideline and benefit into clear, confident next steps for you."
+                "I'm Inara, your AI assistant! I can help you with document-based questions using our knowledge base, or answer general knowledge questions directly. How can I help you today?"
             )
 
         # Skip if the message clearly contains a substantive question or keywords
@@ -566,32 +566,32 @@ class HrBot():
 
         if normalized in greetings:
             return (
-                "Hello! I'm Inara, your HR companion, ready to unpack policies, benefits, and anything HR-related whenever you are."
+                "Hello! I'm Inara, your AI assistant. I can help you with document questions or general knowledge. How can I assist you today?"
             )
 
         if normalized in gratitude or (
             ("thank" in normalized or "thanks" in normalized) and len(normalized.split()) <= 6
         ):
             return (
-                "You're very welcome! If another HR detail pops up, just say the word and I'll jump right back in."
+                "You're very welcome! Feel free to ask me anything else - whether it's about documents or general knowledge."
             )
 
         if normalized in farewells:
             return (
-                "Take care! Whenever you need clarity on HR policies or next steps, I'll be right here to help."
+                "Take care! I'm here whenever you need help with documents or have any questions."
             )
 
-        # Handle short greetings that include light extras (e.g., "hi there!", "hello hr bot")
+        # Handle short greetings that include light extras (e.g., "hi there!", "hello inara")
         for phrase in greetings:
             if normalized.startswith(phrase) and len(normalized.split()) <= 5:
                 return (
-                    "Hi there! Whenever you're ready to chat HR policies or benefits, I'll guide you through every detail."
+                    "Hi there! I'm here to help with any questions - from document lookups to general knowledge."
                 )
 
         for phrase in farewells:
             if normalized.startswith(phrase) and len(normalized.split()) <= 5:
                 return (
-                    "Sending you off with good vibes! Circle back anytime you want to explore HR topics together."
+                    "Goodbye! Feel free to come back anytime you have questions."
                 )
 
         return None
@@ -868,14 +868,14 @@ class HrBot():
         return None
     
     @agent
-    def hr_assistant(self) -> Agent:
+    def general_assistant(self) -> Agent:
         """
-        Empathetic, human-like HR assistant with deep policy knowledge
-        Configuration is loaded from agents.yaml
+        General-purpose AI assistant that handles both RAG and general knowledge queries.
+        Configuration is loaded from agents.yaml.
         """
         return Agent(
-            config=self.agents_config['hr_assistant'],
-            tools=[self.hybrid_rag_tool, self.master_actions_tool],  # Both tools available
+            config=self.agents_config['general_assistant'],
+            tools=[self.hybrid_rag_tool, self.master_actions_tool],  # Both RAG tools available
             llm=self.llm,
             verbose=True,
             max_iter=15,  # Increased to allow multiple tool calls if needed
@@ -885,19 +885,21 @@ class HrBot():
         )
     
     @task
-    def answer_hr_query(self) -> Task:
+    def answer_query(self) -> Task:
         """
-        Main task: Answer employee HR queries with empathy, accuracy, and detailed information
-        Configuration is loaded from tasks.yaml
+        Main task: Answer queries with accuracy and helpfulness.
+        For document queries: uses RAG tools and cites sources.
+        For general knowledge: responds directly without tools.
+        Configuration is loaded from tasks.yaml.
         """
         return Task(
-            config=self.tasks_config['answer_hr_query'],
-            agent=self.hr_assistant(),
+            config=self.tasks_config['answer_query'],
+            agent=self.general_assistant(),
         )
     
     @crew
     def crew(self) -> Crew:
-        """Creates the production-ready HR Bot crew"""
+        """Creates the production-ready general-purpose AI assistant crew"""
         crew = Crew(
             agents=self.agents,
             tasks=self.tasks,

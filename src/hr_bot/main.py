@@ -37,7 +37,7 @@ def run():
     print("="*70 + "\n")
     
     # Default query for testing — different topic: harassment/whistleblower (sensitive)
-    default_query = "A colleague has been making inappropriate comments about my appearance. What should I do? What are my options and how do I report this?"
+    default_query = "My wife is expecting and I want to know about the maternity leave policy.And also how can i apply it. and one more thing does government provide any benefits to the employees who are on maternity leave?"
     
     # Check if query is provided as argument
     if len(sys.argv) > 1 and sys.argv[0] != 'crewai':
