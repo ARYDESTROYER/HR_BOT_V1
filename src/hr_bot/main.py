@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
-Production-Ready HR Bot - Main Entry Point
-Hierarchical manager + specialists crew with hybrid RAG and Apideck integration
+Inara AI Assistant - Main Entry Point
+Generalized AI assistant with Hybrid RAG for documents + LLM for general knowledge
 """
 
 import sys
@@ -33,11 +33,11 @@ def run():
         hr_bot run [query]
     """
     print("\n" + "="*70)
-    print("HR Bot - Production-Ready HR Assistant")
+    print("Inara AI Assistant - Your Knowledge Companion")
     print("="*70 + "\n")
     
-    # Default query for testing — different topic: harassment/whistleblower (sensitive)
-    default_query = "My wife is expecting and I want to know about the maternity leave policy.And also how can i apply it. and one more thing does government provide any benefits to the employees who are on maternity leave?"
+    # Default query for testing — complex query combining RAG + general knowledge + India focus
+    default_query = "I am planning to resign from my company. Can you tell me what is the notice period policy, how do I submit my resignation, and what are my rights as an employee in India during the notice period? Also explain what is gratuity and am I eligible for it?"
     
     # Check if query is provided as argument
     if len(sys.argv) > 1 and sys.argv[0] != 'crewai':
@@ -83,12 +83,12 @@ def run():
 
 def interactive():
     """
-    Run the HR Bot in interactive mode for continuous queries
+    Run Inara in interactive mode for continuous queries
     """
     print("\n" + "="*70)
-    print("HR Bot - Interactive Mode")
+    print("Inara AI Assistant - Interactive Mode")
     print("="*70 + "\n")
-    print("Ask about HR policies or procedures (type 'exit' to quit).\n")
+    print("Ask me anything - documents or general knowledge (type 'exit' to quit).\n")
     
     #bot = HrBotHierarchical()
     bot = HrBot()
@@ -127,10 +127,10 @@ def interactive():
 
 def setup():
     """
-    Setup the HR Bot environment
+    Setup the Inara AI Assistant environment
     """
     print("\n" + "="*70)
-    print("HR Bot Setup")
+    print("Inara AI Assistant Setup")
     print("="*70 + "\n")
     
     # Check for required directories
@@ -138,7 +138,7 @@ def setup():
     if not data_dir.exists():
         print("'data' directory not found. Creating it...")
         data_dir.mkdir(exist_ok=True)
-        print("Created 'data' directory. Please add HR documents (.docx) to this folder.")
+        print("Created 'data' directory. Please add documents (.docx) to this folder.")
     else:
         doc_count = len(list(data_dir.glob("*.docx")))
         print(f"Found {doc_count} document(s) in 'data' directory")
@@ -171,7 +171,7 @@ def setup():
             print(f"{var} is NOT set - {description}")
     
     print("\n" + "="*70)
-    print("Setup complete. Use 'hr_bot run' to start the bot.")
+    print("Setup complete. Run 'crewai run' to start Inara.")
     print("="*70 + "\n")
 
 
