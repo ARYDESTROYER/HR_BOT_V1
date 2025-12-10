@@ -88,6 +88,13 @@ if not os.getenv("CHAINLIT_AUTH_SECRET"):
         "Run `chainlit create-secret` and set CHAINLIT_AUTH_SECRET before production deploys."
     )
 
+# Validate OAuth configuration to prevent confusing error messages
+if not os.getenv("OAUTH_GOOGLE_CLIENT_ID") or not os.getenv("OAUTH_GOOGLE_CLIENT_SECRET"):
+    logger.warning(
+        "OAuth credentials (OAUTH_GOOGLE_CLIENT_ID, OAUTH_GOOGLE_CLIENT_SECRET) are not configured. "
+        "Users will see authentication errors. Please configure OAuth in .env file."
+    )
+
 SUPPORT_CONTACT_EMAIL = os.getenv("SUPPORT_CONTACT_EMAIL", "support@company.com")
 DEFAULT_PLACEHOLDER = "Ask me anything, I'm here to help."
 
@@ -507,6 +514,22 @@ async def header_auth(headers: Headers) -> Optional[cl.User]:
 # ---------------------------------------------------------------------------
 # Chainlit lifecycle
 # ---------------------------------------------------------------------------
+
+
+@cl.on_app_startup
+async def startup() -> None:
+    """Log application startup and configuration status."""
+    oauth_configured = bool(os.getenv("OAUTH_GOOGLE_CLIENT_ID") and os.getenv("OAUTH_GOOGLE_CLIENT_SECRET"))
+    logger.info(
+        "Inara HR Assistant starting up. OAuth configured: %s, Dev login enabled: %s",
+        oauth_configured,
+        _env_flag("ALLOW_DEV_LOGIN")
+    )
+    if not oauth_configured:
+        logger.error(
+            "WARNING: OAuth is not configured! Users will encounter authentication errors. "
+            "Please set OAUTH_GOOGLE_CLIENT_ID and OAUTH_GOOGLE_CLIENT_SECRET in your .env file."
+        )
 
 
 @cl.on_app_shutdown
