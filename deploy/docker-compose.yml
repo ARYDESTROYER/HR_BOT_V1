@@ -1,0 +1,15 @@
+version: "3.9"
+
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - ./open-webui.env
+    volumes:
+      - open-webui-data:/app/backend/data
+
+volumes:
+  open-webui-data:

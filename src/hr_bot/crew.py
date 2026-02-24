@@ -458,6 +458,8 @@ class HrBot():
         max_retries = 3
         retry_delays = [1, 2, 4]  # Exponential backoff: 1s, 2s, 4s
         
+        self.last_usage = None  # reset usage for this call
+
         for attempt in range(max_retries):
             try:
                 result = self.crew().kickoff(inputs=inputs)
@@ -481,6 +483,38 @@ class HrBot():
                 print(f"❌ Unexpected error during crew execution: {e}")
                 raise
         
+        # Extract usage metadata if available
+        usage = {}
+        for key in ("usage", "token_usage", "usage_metadata", "response_metadata"):
+            candidate = getattr(result, key, None)
+            if candidate and isinstance(candidate, dict):
+                usage.update(candidate)
+        # Some providers tuck usage inside raw payload
+        raw_payload = getattr(result, "raw", None)
+        if isinstance(raw_payload, dict):
+            usage.update(raw_payload.get("usage", {}))
+            usage.update(raw_payload.get("tokenUsage", {}))
+
+        tokens_in = usage.get("input_tokens") or usage.get("prompt_tokens") or usage.get("inputTokens")
+        tokens_out = usage.get("output_tokens") or usage.get("completion_tokens") or usage.get("outputTokens")
+        cost = None
+
+        # Optional cost calculation using env rates (USD per 1K tokens)
+        try:
+            rate_in = float(os.getenv("TOKEN_COST_PER_1K_INPUT", "0"))
+            rate_out = float(os.getenv("TOKEN_COST_PER_1K_OUTPUT", "0"))
+            if tokens_in is not None or tokens_out is not None:
+                cost = ((tokens_in or 0) / 1000.0) * rate_in + ((tokens_out or 0) / 1000.0) * rate_out
+        except Exception:
+            cost = None
+
+        self.last_usage = {
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+            "tokens_total": (tokens_in or 0) + (tokens_out or 0) if (tokens_in is not None or tokens_out is not None) else None,
+            "cost": cost,
+        }
+
         # Format and cache response
         response_text = str(result.raw) if hasattr(result, 'raw') else str(result)
         # NOTE: Do NOT remove sources for regular HR queries - only for small talk

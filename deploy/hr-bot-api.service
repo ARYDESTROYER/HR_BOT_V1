@@ -1,0 +1,15 @@
+[Unit]
+Description=Inara HR Bot API Bridge
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/chat/app/HR_BOT_V1
+EnvironmentFile=/home/chat/app/HR_BOT_V1/.env
+ExecStart=/home/chat/app/HR_BOT_V1/.venv/bin/uvicorn hr_bot.api.server:app --host 0.0.0.0 --port 8502
+Restart=on-failure
+User=chat
+Group=chat
+
+[Install]
+WantedBy=multi-user.target

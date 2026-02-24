@@ -105,13 +105,29 @@ async def logs_page(request: Request) -> HTMLResponse:
         return redirect
     
     user = get_current_user(request)
-    query_logs = admin_services.get_query_logs(limit=100)
+    params = request.query_params
+    user_filter = params.get("user")
+    source_filter = params.get("source")
+    search_filter = params.get("search")
+    query_logs = admin_services.get_query_logs(
+        limit=200,
+        user=user_filter,
+        source=source_filter,
+        search=search_filter,
+    )
     audit_logs = admin_services.get_admin_audit_log(limit=50)
+    users = admin_services.list_log_users()
     
     return HTMLResponse(render_template("logs.html", {
         "user": user,
         "query_logs": query_logs,
         "audit_logs": audit_logs,
+        "users": users,
+        "filters": {
+            "user": user_filter or "",
+            "source": source_filter or "",
+            "search": search_filter or "",
+        },
         "page": "logs"
     }))
 

@@ -123,6 +123,17 @@ def _env_list(key: str) -> List[str]:
     return [item.strip().lower() for item in values.split(",") if item.strip()]
 
 
+def _estimate_tokens(text: str) -> int:
+    """Lightweight token estimate (~4 chars per token).
+
+    We avoid heavy tokenizer deps and use a simple heuristic that tracks
+    reasonably with common LLM pricing models.
+    """
+    if not text:
+        return 0
+    return max(1, len(text) // 4)
+
+
 def _normalize_email(email: Optional[str]) -> str:
     return (email or "").strip().lower()
 
@@ -416,7 +427,15 @@ async def _clear_response_cache(role: str) -> str:
     return "Response cache cleared successfully."
 
 
-def _log_query(email: str, query: str, cached: bool = False, duration: float = 0.0) -> None:
+def _log_query(
+    email: str,
+    query: str,
+    cached: bool = False,
+    duration: float = 0.0,
+    tokens_in: int | None = None,
+    tokens_out: int | None = None,
+    cost: float | None = None,
+) -> None:
     """Log a query for admin analytics."""
     import json
     from datetime import datetime
@@ -425,12 +444,20 @@ def _log_query(email: str, query: str, cached: bool = False, duration: float = 0
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "queries.jsonl"
     
+    total_tokens = None
+    if tokens_in is not None or tokens_out is not None:
+        total_tokens = (tokens_in or 0) + (tokens_out or 0)
+
     entry = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "user": email,
         "query": query[:200],  # Truncate for storage
         "cached": cached,
         "duration": f"{duration:.2f}s" if duration else None,
+        "tokens_in": tokens_in,
+        "tokens_out": tokens_out,
+        "tokens_total": total_tokens,
+        "cost": round(cost, 6) if cost is not None else None,
     }
     
     try:
@@ -440,7 +467,7 @@ def _log_query(email: str, query: str, cached: bool = False, duration: float = 0
         logger.warning("Failed to log query: %s", e)
 
 
-async def _query_bot(prompt: str) -> str:
+async def _query_bot(prompt: str) -> tuple[str, dict | None]:
     bot: HrBot = cl.user_session.get("bot")
     if bot is None:
         role = cl.user_session.get("role", "employee")
@@ -457,7 +484,9 @@ async def _query_bot(prompt: str) -> str:
             retrieval_query=augmented_question,
         )
 
-    return await _run_blocking(_call_bot)
+    answer = await _run_blocking(_call_bot)
+    usage = getattr(bot, "last_usage", None)
+    return answer, usage
 
 
 # ---------------------------------------------------------------------------
@@ -570,9 +599,8 @@ async def on_message(message: cl.Message) -> None:
     cached = False
     
     try:
-        answer = await _query_bot(prompt)
+        answer, usage = await _query_bot(prompt)
         duration = time.time() - start_time
-        # Check if response was cached (fast response indicates cache hit)
         cached = duration < 1.0
     except Exception as exc:
         duration = time.time() - start_time
@@ -585,8 +613,29 @@ async def on_message(message: cl.Message) -> None:
         _log_query(email, prompt, cached=False, duration=duration)
         return
 
-    # Log the query
-    _log_query(email, prompt, cached=cached, duration=duration)
+    tokens_in = None
+    tokens_out = None
+    cost = None
+    if usage:
+        tokens_in = usage.get("tokens_in")
+        tokens_out = usage.get("tokens_out")
+        cost = usage.get("cost")
+
+    # Fallback heuristic if provider didn't return usage
+    if tokens_in is None:
+        tokens_in = _estimate_tokens(prompt)
+    if tokens_out is None:
+        tokens_out = _estimate_tokens(answer)
+
+    _log_query(
+        email,
+        prompt,
+        cached=cached,
+        duration=duration,
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        cost=cost,
+    )
     
     formatted = format_answer(answer)
     history.append({"role": "assistant", "content": formatted})

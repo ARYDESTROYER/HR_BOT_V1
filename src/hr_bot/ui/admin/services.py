@@ -349,14 +349,42 @@ class AdminServices:
     def get_admin_emails(self) -> List[str]:
         """Get list of admin emails for display."""
         return [e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()]
+
+    def list_log_users(self, limit: int = 500) -> List[str]:
+        """List distinct users seen in recent query logs."""
+        users = []
+        seen = set()
+        query_log = self.logs_dir / "queries.jsonl"
+        if query_log.exists():
+            try:
+                with open(query_log, 'r') as f:
+                    lines = f.readlines()
+                    for line in reversed(lines[-limit:]):
+                        try:
+                            entry = json.loads(line)
+                        except Exception:
+                            continue
+                        u = entry.get("user")
+                        if u and u.lower() not in seen:
+                            seen.add(u.lower())
+                            users.append(u)
+            except Exception:
+                pass
+        return sorted(users, key=lambda x: x.lower())
     
     # -------------------------------------------------------------------------
     # Logs
     # -------------------------------------------------------------------------
     
-    def get_query_logs(self, limit: int = 100) -> List[Dict[str, Any]]:
-        """Get recent query logs."""
-        logs = []
+    def get_query_logs(
+        self,
+        limit: int = 100,
+        user: Optional[str] = None,
+        source: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Get recent query logs with optional filters."""
+        logs: List[Dict[str, Any]] = []
         query_log = self.logs_dir / "queries.jsonl"
         
         if query_log.exists():
@@ -365,9 +393,26 @@ class AdminServices:
                     lines = f.readlines()
                     for line in reversed(lines[-limit:]):
                         try:
-                            logs.append(json.loads(line))
-                        except:
-                            pass
+                            entry = json.loads(line)
+                        except Exception:
+                            continue
+
+                        if user and entry.get("user", "").lower() != user.lower():
+                            continue
+                        if source:
+                            is_cached = bool(entry.get("cached"))
+                            if source.lower() == "cached" and not is_cached:
+                                continue
+                            if source.lower() == "rag" and is_cached:
+                                continue
+                        if search:
+                            q = entry.get("query", "")
+                            if search.lower() not in q.lower():
+                                continue
+
+                        logs.append(entry)
+                        if len(logs) >= limit:
+                            break
             except Exception as e:
                 logger.error(f"Error reading query logs: {e}")
         

@@ -1,13 +1,13 @@
-## Inara HR Assistant v7.1 – Enterprise AI HR Assistant
+## Inara HR Assistant v8.0 – Enterprise AI HR Assistant
 
-Production-ready AI assistant for HR teams, powered by **CrewAI** and **Amazon Bedrock Nova Lite**, with **role-based S3 document access**, **ETag-based smart caching**, and a **modern Chainlit web UI**.
+Production-ready AI assistant for HR teams, powered by **CrewAI** and **Amazon Bedrock Nova Lite**, with **role-based S3 document access**, **ETag-based smart caching**, and a modern frontend stack (**Chainlit** and **Open WebUI via FastAPI bridge**).
 
 ---
 
 ## 1. Overview
 
 - **Audience:** Enterprise HR / IT teams
-- **Primary Surface:** Chainlit web app (Streamlit kept only for rollback)
+- **Primary Surface:** Open WebUI frontend (with Chainlit retained for rollback)
 - **Core Capabilities:**
 	- Role-aware HR policy Q&A (Executive vs Employee views)
 	- "How do I…?" guided workflows via Master Actions
@@ -17,7 +17,15 @@ Production-ready AI assistant for HR teams, powered by **CrewAI** and **Amazon B
 
 ---
 
-## 2. Key Features (v7.1)
+## 2. Key Features (v8.0)
+### 2.0 v8.0 Updates
+
+- **Open WebUI Pipe Fix**: Directly injected the updated `pipe_function.py` into the Open WebUI SQLite database to properly parse SSE streams and fix the infinite loading issue.
+
+- **LTM Permissions**: Fixed `storage/long_term_memory.db` permissions to allow the backend to save conversation history without readonly memory errors.
+
+- **Google SSO Configuration**: Documented the correct redirect URIs (`/oauth/google/callback` and `/auth/oauth/google/callback`) for Google Cloud Console to fix the `redirect_uri_mismatch` error.
+
 
 ### 2.1 Role-Based S3 Document Management
 
@@ -72,7 +80,14 @@ Earlier releases improved intent precision by expanding `stop_words` (e.g., `day
 	- Real-time agent status (Analyzing → Searching → Preparing)
 	- Premium dark theme, responsive layout, and branding-friendly header.
 
-### 2.6 v7.1-Specific Improvements
+### 2.8 Open WebUI Frontend (New)
+
+- Open WebUI runs as the client-facing UI.
+- Existing backend behavior is preserved through `src/hr_bot/api/server.py`.
+- Open WebUI calls the backend through a Pipe Function (`deploy/pipe_function.py`) and passes user identity for RBAC.
+- Core logic remains in CrewAI (`HrBot.query_with_cache`) with unchanged RAG/cache/safety flow.
+
+### 2.6 v8.0-Specific Improvements
 
 - **Message hardening:** `_author_as_string` ensures Chainlit messages never serialize `cl.User` objects (fixing “author must be a string”).
 - **Production guards:** Added input validation to prevent empty/short queries and overly long queries (now configurable; default limit set to 2500 characters). This stops accidental tool misuse and prompt-injection style inputs.
@@ -83,7 +98,7 @@ Earlier releases improved intent precision by expanding `stop_words` (e.g., `day
 - **Hybrid RAG fixes:** Fixed RAG chunk merging bug to prevent splitting semantically connected content across chunks, improving answer quality and citation accuracy.
 - **Misc:** small UX and CI fixes, improved tests and evaluation dataset coverage.
 
-### 2.7 v7.1 – Admin Console
+### 2.7 v8.0 – Admin Console
 
 New lightweight admin dashboard at `/admin/` for system monitoring:
 
@@ -249,6 +264,25 @@ CHAINLIT_MAX_WORKERS=4
 
 ## 8. Deploying with systemd (Production)
 
+### 8.0 Open WebUI + API Bridge (Recommended)
+
+Start the FastAPI bridge:
+
+```bash
+uv run api_server
+```
+
+Start Open WebUI:
+
+```bash
+cd deploy
+docker compose up -d
+```
+
+Upload `deploy/pipe_function.py` in Open WebUI Admin → Functions, then select the `INARA/HR Assistant` model in chat.
+
+Systemd sample for API bridge is provided at `deploy/hr-bot-api.service`.
+
 Example unit file (see `deploy/chat-chainlit.service`):
 
 ```ini
@@ -340,11 +374,14 @@ Both actions run asynchronously and report success/failure inside the chat.
 ```text
 HR_BOT_V1/
 ├── src/hr_bot/
+│   ├── api/
+│   │   ├── server.py         # FastAPI OpenAI-compatible bridge for Open WebUI
+│   │   └── main.py           # CLI entrypoint for API server
 │   ├── crew.py               # CrewAI orchestration
 │   ├── main.py               # CLI entry points
 │   ├── ui/
 │   │   ├── chainlit_app.py   # Main Chainlit app
-│   │   └── admin/            # Admin console (v7.1)
+│   │   └── admin/            # Admin console (v8.0)
 │   │       ├── routes.py     # Starlette routes
 │   │       ├── services.py   # Backend logic
 │   │       ├── auth.py       # JWT auth helpers
@@ -356,9 +393,13 @@ HR_BOT_V1/
 │       ├── s3_loader.py
 │       └── cache.py
 ├── data/
-│   └── logs/                 # Query logs (v7.1)
+│   └── logs/                 # Query logs (v8.0)
 ├── deploy/
-│   └── chat-chainlit.service # Sample systemd unit
+│   ├── chat-chainlit.service # Chainlit systemd unit (rollback path)
+│   ├── hr-bot-api.service    # API bridge systemd unit
+│   ├── docker-compose.yml    # Open WebUI deployment
+│   ├── open-webui.env        # Open WebUI environment variables
+│   └── pipe_function.py      # Open WebUI Pipe function
 ├── pyproject.toml
 └── README.md
 ```
@@ -369,7 +410,7 @@ HR_BOT_V1/
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ HR Bot v7.1 Architecture                                                │
+│ HR Bot v8.0 Architecture                                                │
 │ Role-Based S3 + ETag Smart Caching + Hybrid RAG + Chainlit UI          │
 └──────────────────────────────────────────────────────────────────────────┘
 
@@ -385,7 +426,7 @@ User Query (Role: Executive/Employee)
 		   ↓
 	┌──────────────────────┐          ┌───────────────────┐
 	│      HR Bot          │          │  Admin Console    │
-	│   (CrewAI crew)      │          │  /admin/ (v7.1)   │
+	│   (CrewAI crew)      │          │  /admin/ (v8.0)   │
 	│  Nova Lite via       │          │  - Dashboard      │
 	│  Amazon Bedrock      │          │  - Cache mgmt     │
 	│  Semantic Caching    │          │  - Query logs     │
