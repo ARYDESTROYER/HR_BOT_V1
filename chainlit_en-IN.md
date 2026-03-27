@@ -7,4 +7,21 @@ Welcome to the Chainlit edition of the Inara HR copilot. This UI wraps the exist
 - Admin actions to refresh the HR knowledge base and clear the semantic response cache when troubleshooting.
 - Inline source citations pulled directly from the underlying policy corpus.
 
-Sign in with your corporate Google account to get started. Need help? Contact the HR Tech team at `SUPPORT_CONTACT_EMAIL`.
+## Getting Started
+
+Sign in with your corporate Google account to access the HR Assistant. Only authorised email addresses can access the system.
+
+### Authentication Requirements
+
+- You must use an email address listed in `EXECUTIVE_EMAILS` or `EMPLOYEE_EMAILS`
+- If you see an authentication error, please verify:
+  1. You're using the correct corporate email address
+  2. Your email is authorised by the system administrator
+  3. OAuth configuration is properly set up (for administrators)
+
+### Need Help?
+
+If you encounter any issues or need access:
+- Contact the HR Tech team at `SUPPORT_CONTACT_EMAIL`
+- Ensure you're using your corporate email address for authentication
+- Check that your email is on the authorised users list
